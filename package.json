@@ -1,12 +1,41 @@
 {
-  "name": "todoist",
+  "name": "todoist-autolabel-service",
   "version": "1.0.0",
-  "main": "index.js",
+  "type": "module",
+  "main": "dist/service.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node dist/service.js",
+    "dev": "tsx src/service.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop todoist-autolabel",
+    "pm2:restart": "pm2 restart todoist-autolabel",
+    "pm2:logs": "pm2 logs todoist-autolabel",
+    "pm2:status": "pm2 status"
   },
-  "keywords": [],
+  "keywords": ["todoist", "autolabel", "ml", "classification"],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "Automatic task labeling service for Todoist using local ML classification",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@doist/todoist-api-typescript": "^3.0.3",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
