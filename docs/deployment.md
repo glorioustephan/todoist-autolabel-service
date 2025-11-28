@@ -128,7 +128,7 @@ module.exports = {
       script: 'dist/service.js',
       instances: 1,
       autorestart: true,
-      max_memory_restart: '500M',
+      max_memory_restart: '200M',
       error_file: './logs/pm2-error.log',
       out_file: './logs/pm2-out.log',
       time: true,
@@ -229,6 +229,12 @@ npm run pm2:start
 sqlite3 data/todoist.db "SELECT * FROM error_logs ORDER BY timestamp DESC LIMIT 20;"
 ```
 
+### View Classification History
+
+```bash
+sqlite3 data/todoist.db "SELECT id, content, classified, labels FROM tasks ORDER BY created_at DESC LIMIT 20;"
+```
+
 ## Troubleshooting
 
 ### Service Keeps Restarting
@@ -244,12 +250,12 @@ Common causes:
 - Invalid API tokens
 - Network connectivity issues
 
-### High Memory Usage
+### Memory Usage
 
-The ML model uses ~400MB RAM. If memory issues occur:
+The service uses minimal memory (~50-100MB) since classification is done via API calls. If memory issues occur:
 
-1. Increase `max_memory_restart` in `ecosystem.config.cjs`
-2. Or reduce `POLL_INTERVAL_MS` to reduce frequency
+1. Check for memory leaks in logs
+2. Restart the service: `npm run pm2:restart`
 
 ### Service Not Starting on Boot
 
@@ -268,7 +274,17 @@ The ML model uses ~400MB RAM. If memory issues occur:
 If you see rate limit errors:
 
 1. Increase `POLL_INTERVAL_MS` in `.env`
-2. The service has built-in delays between API calls
+2. The service has built-in 200ms delays between API calls
+
+### Claude API Errors
+
+Common Claude API issues:
+
+| Error | Solution |
+|-------|----------|
+| `credit` / `billing` | Add credits to your Anthropic account |
+| `rate_limit` | Increase poll interval or wait |
+| `invalid_api_key` | Check your `ANTHROPIC_API_KEY` |
 
 ## Security Notes
 
@@ -303,3 +319,14 @@ pm2 reset todoist-autolabel
 pm2 ecosystem
 ```
 
+## Cost Estimation
+
+With Claude Haiku at ~$0.25 per million tokens:
+
+| Tasks/Day | Est. Monthly Cost |
+|-----------|-------------------|
+| 10 | < $0.01 |
+| 100 | ~$0.05 |
+| 1000 | ~$0.50 |
+
+The service is very cost-effective for typical personal use.

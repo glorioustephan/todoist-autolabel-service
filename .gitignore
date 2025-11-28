@@ -35,6 +35,3 @@ Thumbs.db
 
 # Test coverage
 coverage/
-
-# Transformers.js model cache (can be large)
-.transformers-cache/
