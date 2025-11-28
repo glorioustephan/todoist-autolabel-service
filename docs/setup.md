@@ -60,7 +60,7 @@ LOG_LEVEL=info
 
 ## Labels Configuration
 
-The service uses labels defined in `./labels.json`. This file should contain your label taxonomy:
+The service uses labels defined in `./labels.json`. This file should contain your label taxonomy and match what is in Todoist:
 
 ```json
 {
@@ -70,14 +70,6 @@ The service uses labels defined in `./labels.json`. This file should contain you
     { "name": "health", "color": "green" }
   ]
 }
-```
-
-### Syncing Labels to Todoist
-
-Before running the service, ensure all labels exist in your Todoist account. You can use the existing label creation script:
-
-```bash
-npx tsx todoist/create-todoist-labels.ts ./labels.json
 ```
 
 ## Build the Service
