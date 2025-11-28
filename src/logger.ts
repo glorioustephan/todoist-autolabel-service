@@ -92,7 +92,7 @@ export class Logger {
   /**
    * Log a debug message
    */
-  debug(message: string, meta?: Record<string, unknown>): void {
+  debug(message: string, meta: Record<string, unknown> = {}): void {
     if (this.shouldLog('debug')) {
       console.log(formatMessage('debug', message, meta));
     }
@@ -101,7 +101,7 @@ export class Logger {
   /**
    * Log an info message
    */
-  info(message: string, meta?: Record<string, unknown>): void {
+  info(message: string, meta: Record<string, unknown> = {}): void {
     if (this.shouldLog('info')) {
       console.log(formatMessage('info', message, meta));
     }
@@ -110,48 +110,48 @@ export class Logger {
   /**
    * Log a warning message
    */
-  warn(message: string, meta?: Record<string, unknown>): void {
+  warn(message: string, meta: Record<string, unknown> = {}): void {
     if (this.shouldLog('warn')) {
       console.warn(formatMessage('warn', message, meta));
     }
   }
 
   /**
-   * Log an error message
+   * Log an error message with optional error object and metadata
    */
-  error(message: string, error?: Error | unknown, meta?: Record<string, unknown>): void {
-    if (this.shouldLog('error')) {
-      const errorMeta: Record<string, unknown> = { ...meta };
-      
-      if (error instanceof Error) {
-        errorMeta.errorMessage = error.message;
-        errorMeta.errorName = error.name;
-        if (error.stack) {
-          // Format stack trace with dimmed color
-          const stackLines = error.stack.split('\n').slice(1, 5);
-          console.error(formatMessage('error', message, errorMeta));
-          stackLines.forEach(line => {
-            console.error(chalk.dim(line));
-          });
-          return;
-        }
-      } else if (error !== undefined) {
-        errorMeta.error = String(error);
+  error(message: string, error?: Error | unknown, meta: Record<string, unknown> = {}): void {
+    if (!this.shouldLog('error')) return;
+
+    const errorMeta: Record<string, unknown> = { ...meta };
+
+    if (error instanceof Error) {
+      errorMeta.errorMessage = error.message;
+      errorMeta.errorName = error.name;
+      if (error.stack) {
+        // Format stack trace with dimmed color
+        const stackLines = error.stack.split('\n').slice(1, 5);
+        console.error(formatMessage('error', message, errorMeta));
+        stackLines.forEach(line => {
+          console.error(chalk.dim(line));
+        });
+        return;
       }
-      
-      console.error(formatMessage('error', message, errorMeta));
+    } else if (error !== undefined) {
+      errorMeta.error = String(error);
     }
+
+    console.error(formatMessage('error', message, errorMeta));
   }
 
   /**
    * Log a success message (info level with green styling)
    */
-  success(message: string, meta?: Record<string, unknown>): void {
+  success(message: string, meta: Record<string, unknown> = {}): void {
     if (this.shouldLog('info')) {
       const timestamp = formatTimestamp();
       const levelBadge = chalk.green.bold('OK   ');
       const formattedMessage = chalk.green(message);
-      const metaStr = meta ? formatMeta(meta) : '';
+      const metaStr = formatMeta(meta);
       console.log(`${timestamp} ${levelBadge} ${formattedMessage}${metaStr}`);
     }
   }

@@ -128,7 +128,7 @@ describe('logger.ts - Logging System', () => {
 
         logger.info('User action', meta);
 
-        const call = consoleSpy.log.mock.calls[0][0];
+        const call = consoleSpy.log.mock.calls[0]![0];
         expect(call).toContain('User action');
         expect(call).toContain('userId=');
         expect(call).toContain('123');
@@ -150,7 +150,7 @@ describe('logger.ts - Logging System', () => {
 
         logger.info('Complex metadata', meta);
 
-        const call = consoleSpy.log.mock.calls[0][0];
+        const call = consoleSpy.log.mock.calls[0]![0];
         expect(call).toContain('string="value"');
         expect(call).toContain('number=42');
         expect(call).toContain('boolean=true');
@@ -165,7 +165,7 @@ describe('logger.ts - Logging System', () => {
 
         logger.info('No metadata', {});
 
-        const call = consoleSpy.log.mock.calls[0][0];
+        const call = consoleSpy.log.mock.calls[0]![0];
         expect(call).toContain('No metadata');
         expect(call).not.toContain('='); // No metadata formatting
       });
@@ -239,12 +239,12 @@ describe('logger.ts - Logging System', () => {
           logger.error('Something failed', error);
 
           expect(consoleSpy.error).toHaveBeenCalledTimes(2); // Message + stack
-          const firstCall = consoleSpy.error.mock.calls[0][0];
+          const firstCall = consoleSpy.error.mock.calls[0]![0];
           expect(firstCall).toContain('Something failed');
           expect(firstCall).toContain('errorMessage="Test error"');
           expect(firstCall).toContain('errorName="Error"');
 
-          const secondCall = consoleSpy.error.mock.calls[1][0];
+          const secondCall = consoleSpy.error.mock.calls[1]![0];
           expect(secondCall).toContain('at test.js:1:1');
         });
 
@@ -253,7 +253,7 @@ describe('logger.ts - Logging System', () => {
 
           logger.error('Something failed', 'string error');
 
-          const call = consoleSpy.error.mock.calls[0][0];
+          const call = consoleSpy.error.mock.calls[0]![0];
           expect(call).toContain('Something failed');
           expect(call).toContain('error="string error"');
         });
@@ -265,7 +265,7 @@ describe('logger.ts - Logging System', () => {
 
           logger.error('Processing failed', error, meta);
 
-          const call = consoleSpy.error.mock.calls[0][0];
+          const call = consoleSpy.error.mock.calls[0]![0];
           expect(call).toContain('Processing failed');
           expect(call).toContain('taskId="task-123"');
           expect(call).toContain('errorMessage="Test error"');
@@ -475,7 +475,7 @@ describe('logger.ts - Logging System', () => {
         false: false,
       });
 
-      const call = consoleSpy.log.mock.calls[0][0];
+      const call = consoleSpy.log.mock.calls[0]![0];
       expect(call).toContain('nullValue=null');
       expect(call).toContain('undefinedValue=undefined');
       expect(call).toContain('emptyString=""');
@@ -491,7 +491,7 @@ describe('logger.ts - Logging System', () => {
         arrow: () => {},
       });
 
-      const call = consoleSpy.log.mock.calls[0][0];
+      const call = consoleSpy.log.mock.calls[0]![0];
       // Functions should be stringified
       expect(call).toContain('fn=');
       expect(call).toContain('arrow=');
@@ -519,8 +519,8 @@ describe('logger.ts - Logging System', () => {
 
       logger.info('Second message');
 
-      const firstCall = consoleSpy.log.mock.calls[0][0];
-      const secondCall = consoleSpy.log.mock.calls[1][0];
+      const firstCall = consoleSpy.log.mock.calls[0]![0];
+      const secondCall = consoleSpy.log.mock.calls[1]![0];
 
       expect(firstCall).toContain('2024-01-01T12:00:00.000Z');
       expect(secondCall).toContain('2024-01-01T12:00:01.000Z');

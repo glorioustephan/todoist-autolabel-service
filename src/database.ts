@@ -11,7 +11,10 @@ import type {
   TaskStatus,
   ErrorLogRecord,
   SyncState,
+  TaskId,
+  Result,
 } from './types.js';
+import { ok, err, asTaskId } from './types.js';
 import { getLogger } from './logger.js';
 
 /**
@@ -34,6 +37,9 @@ export class DatabaseManager {
     this.db = new Database(config.dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('cache_size = 1000');
+    this.db.pragma('temp_store = memory');
 
     // Initialize schema
     this.initSchema();
@@ -166,10 +172,15 @@ export class DatabaseManager {
   /**
    * Get task by ID
    */
-  getTask(taskId: string): TaskRecord | null {
+  getTask(taskId: TaskId): Result<TaskRecord, 'not_found'> {
     const stmt = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?');
-    const row = stmt.get(taskId) as Record<string, unknown> | undefined;
-    return row ? this.mapTaskRow(row) : null;
+    const row = stmt.get(taskId);
+
+    if (!row || typeof row !== 'object') {
+      return err('not_found');
+    }
+
+    return ok(this.mapTaskRow(row as Record<string, unknown>));
   }
 
   /**
@@ -267,9 +278,9 @@ export class DatabaseManager {
    * Check if task needs classification
    */
   taskNeedsClassification(taskId: string): boolean {
-    const task = this.getTask(taskId);
-    if (!task) return true;
-    return task.status === 'pending' && task.attempts < 3;
+    const task = this.getTask(asTaskId(taskId));
+    if (!task.success) return true;
+    return task.data.status === 'pending' && task.data.attempts < 3;
   }
 
   /**

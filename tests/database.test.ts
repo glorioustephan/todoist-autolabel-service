@@ -8,6 +8,7 @@ import path from 'path';
 import { DatabaseManager, initDatabase, getDatabase, closeDatabase } from '../src/database.js';
 import { createMockConfig, createMockTaskRecord, createMockErrorLogRecord } from './test-utils.js';
 import type { Config, TaskStatus, TaskRecord } from '../src/types.js';
+import { asTaskId } from '../src/types.js';
 
 // Mock better-sqlite3 for testing
 const mockDatabase = {
@@ -230,12 +231,15 @@ describe('database.ts - Database Operations', () => {
       });
 
       describe('getTask()', () => {
-        it('should return null when task not found', () => {
+        it('should return error when task not found', () => {
           mockStatement.get.mockReturnValue(undefined);
 
-          const task = dbManager.getTask('nonexistent-task');
+          const result = dbManager.getTask(asTaskId('nonexistent-task'));
 
-          expect(task).toBeNull();
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            expect(result.error).toBe('not_found');
+          }
           expect(mockStatement.get).toHaveBeenCalledWith('nonexistent-task');
         });
 
@@ -253,19 +257,22 @@ describe('database.ts - Database Operations', () => {
           };
           mockStatement.get.mockReturnValue(mockRow);
 
-          const task = dbManager.getTask('task-123');
+          const result = dbManager.getTask(asTaskId('task-123'));
 
-          expect(task).toEqual({
-            taskId: 'task-123',
-            content: 'Test task',
-            status: 'pending',
-            labels: '["productivity"]',
-            attempts: 2,
-            lastAttemptAt: '2024-01-01T00:00:00Z',
-            classifiedAt: null,
-            createdAt: '2024-01-01T00:00:00Z',
-            updatedAt: '2024-01-01T00:00:00Z',
-          });
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data).toEqual({
+              taskId: 'task-123',
+              content: 'Test task',
+              status: 'pending',
+              labels: '["productivity"]',
+              attempts: 2,
+              lastAttemptAt: '2024-01-01T00:00:00Z',
+              classifiedAt: null,
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:00Z',
+            });
+          }
         });
       });
 
@@ -309,8 +316,8 @@ describe('database.ts - Database Operations', () => {
           const tasks = dbManager.getTasksByStatus('pending');
 
           expect(tasks).toHaveLength(2);
-          expect(tasks[0].taskId).toBe('task-1');
-          expect(tasks[1].taskId).toBe('task-2');
+          expect(tasks[0]!.taskId).toBe('task-1');
+          expect(tasks[1]!.taskId).toBe('task-2');
         });
       });
 
@@ -337,7 +344,7 @@ describe('database.ts - Database Operations', () => {
             expect.stringContaining("WHERE status = 'pending' AND attempts < 3")
           );
           expect(tasks).toHaveLength(1);
-          expect(tasks[0].taskId).toBe('task-1');
+          expect(tasks[0]!.taskId).toBe('task-1');
         });
       });
 
@@ -421,7 +428,7 @@ describe('database.ts - Database Operations', () => {
             status: 'pending',
             attempts: 2,
           });
-          vi.spyOn(dbManager, 'getTask').mockReturnValue(mockTask);
+          vi.spyOn(dbManager, 'getTask').mockReturnValue({ success: true, data: mockTask });
 
           const needsClassification = dbManager.taskNeedsClassification('task-123');
 
@@ -433,7 +440,7 @@ describe('database.ts - Database Operations', () => {
             status: 'pending',
             attempts: 3,
           });
-          vi.spyOn(dbManager, 'getTask').mockReturnValue(mockTask);
+          vi.spyOn(dbManager, 'getTask').mockReturnValue({ success: true, data: mockTask });
 
           const needsClassification = dbManager.taskNeedsClassification('task-123');
 
@@ -445,7 +452,7 @@ describe('database.ts - Database Operations', () => {
             status: 'classified',
             attempts: 1,
           });
-          vi.spyOn(dbManager, 'getTask').mockReturnValue(mockTask);
+          vi.spyOn(dbManager, 'getTask').mockReturnValue({ success: true, data: mockTask });
 
           const needsClassification = dbManager.taskNeedsClassification('task-123');
 
@@ -457,7 +464,7 @@ describe('database.ts - Database Operations', () => {
             status: 'failed',
             attempts: 3,
           });
-          vi.spyOn(dbManager, 'getTask').mockReturnValue(mockTask);
+          vi.spyOn(dbManager, 'getTask').mockReturnValue({ success: true, data: mockTask });
 
           const needsClassification = dbManager.taskNeedsClassification('task-123');
 
@@ -469,7 +476,7 @@ describe('database.ts - Database Operations', () => {
             status: 'skipped',
             attempts: 0,
           });
-          vi.spyOn(dbManager, 'getTask').mockReturnValue(mockTask);
+          vi.spyOn(dbManager, 'getTask').mockReturnValue({ success: true, data: mockTask });
 
           const needsClassification = dbManager.taskNeedsClassification('task-123');
 

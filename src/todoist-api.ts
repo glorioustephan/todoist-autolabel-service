@@ -3,7 +3,15 @@
  */
 
 import { TodoistApi } from '@doist/todoist-api-typescript';
-import type { Config, TodoistTask, TodoistLabel } from './types.js';
+import type {
+  Config,
+  TodoistTask,
+  TodoistLabel,
+  TaskId,
+  ProjectId,
+  Result,
+} from './types.js';
+import { ok, err, asTaskId, asProjectId, asLabelId } from './types.js';
 import { getLogger } from './logger.js';
 
 // Delay between API calls to avoid rate limiting (ms)
@@ -21,7 +29,7 @@ function sleep(ms: number): Promise<void> {
  */
 export class TodoistApiManager {
   private api: TodoistApi;
-  private inboxProjectId: string | null = null;
+  private inboxProjectId: ProjectId | null = null;
 
   constructor(config: Config) {
     this.api = new TodoistApi(config.todoistApiToken);
@@ -30,63 +38,71 @@ export class TodoistApiManager {
   /**
    * Initialize by fetching the inbox project ID
    */
-  async initialize(): Promise<void> {
+  async initialize(): Promise<Result<void, string>> {
     const logger = getLogger();
-    
+
     try {
       const projects = await this.api.getProjects();
       const inbox = projects.find((p) => p.isInboxProject);
-      
+
       if (!inbox) {
-        throw new Error('Could not find Todoist Inbox project');
+        return err('Could not find Todoist Inbox project');
       }
-      
-      this.inboxProjectId = inbox.id;
+
+      this.inboxProjectId = inbox.id as ProjectId;
       logger.info('Todoist API initialized', { inboxProjectId: this.inboxProjectId });
+      return ok(undefined);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error('Failed to initialize Todoist API', error);
-      throw error;
+      return err(`Failed to initialize Todoist API: ${message}`);
     }
   }
 
   /**
    * Get the inbox project ID
    */
-  getInboxProjectId(): string {
+  getInboxProjectId(): Result<ProjectId, 'not_initialized'> {
     if (!this.inboxProjectId) {
-      throw new Error('Todoist API not initialized. Call initialize() first.');
+      return err('not_initialized');
     }
-    return this.inboxProjectId;
+    return ok(this.inboxProjectId);
   }
 
   /**
    * Get all tasks from the Inbox
    */
-  async getInboxTasks(): Promise<TodoistTask[]> {
+  async getInboxTasks(): Promise<Result<readonly TodoistTask[], string>> {
     const logger = getLogger();
-    
+
     if (!this.inboxProjectId) {
-      await this.initialize();
+      const initResult = await this.initialize();
+      if (!initResult.success) {
+        return err(initResult.error);
+      }
     }
 
     try {
       const tasks = await this.api.getTasks({ projectId: this.inboxProjectId! });
-      
+
       logger.debug(`Fetched ${tasks.length} tasks from Inbox`);
-      
-      return tasks.map((task) => ({
-        id: task.id,
+
+      const mappedTasks = tasks.map((task) => ({
+        id: task.id as TaskId,
         content: task.content,
         description: task.description || '',
-        projectId: task.projectId,
+        projectId: (task.projectId as ProjectId) || null,
         labels: task.labels || [],
         priority: task.priority,
         createdAt: task.createdAt,
         isCompleted: task.isCompleted,
       }));
+
+      return ok(mappedTasks);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error('Failed to fetch inbox tasks', error);
-      throw error;
+      return err(`Failed to fetch inbox tasks: ${message}`);
     }
   }
 
@@ -102,7 +118,7 @@ export class TodoistApiManager {
       logger.debug(`Fetched ${labels.length} labels from Todoist`);
       
       return labels.map((label) => ({
-        id: label.id,
+        id: asLabelId(label.id),
         name: label.name,
         color: label.color,
       }));
@@ -140,10 +156,10 @@ export class TodoistApiManager {
       const task = await this.api.getTask(taskId);
       
       return {
-        id: task.id,
+        id: asTaskId(task.id),
         content: task.content,
         description: task.description || '',
-        projectId: task.projectId,
+        projectId: task.projectId ? asProjectId(task.projectId) : null,
         labels: task.labels || [],
         priority: task.priority,
         createdAt: task.createdAt,

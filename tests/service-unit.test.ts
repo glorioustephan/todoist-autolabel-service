@@ -16,7 +16,13 @@ const mockLogger = {
 };
 
 const mockDatabase = createMockDatabase();
-const mockClassifier = { getAvailableLabels: vi.fn().mockReturnValue(['productivity', 'work']) };
+const mockClassifier = { 
+  getAvailableLabels: vi.fn().mockReturnValue(['productivity', 'work']),
+  reloadLabels: vi.fn().mockResolvedValue({ success: true, data: undefined }),
+  classifyTask: vi.fn(),
+  classifyTasks: vi.fn(),
+  initialize: vi.fn().mockResolvedValue({ success: true, data: undefined }),
+};
 
 vi.mock('../src/config.js', () => ({
   loadConfig: vi.fn().mockReturnValue(mockConfig),
@@ -39,7 +45,7 @@ vi.mock('../src/todoist-api.js', () => ({
 }));
 
 vi.mock('../src/classifier.js', () => ({
-  initClassifier: vi.fn().mockReturnValue(mockClassifier),
+  initClassifier: vi.fn().mockResolvedValue({ success: true, data: mockClassifier }),
 }));
 
 vi.mock('../src/sync.js', () => ({
@@ -127,10 +133,13 @@ describe('service.ts - Service Components', () => {
   describe('Classifier Initialization', () => {
     it('should initialize classifier and load labels', async () => {
       const { initClassifier } = await import('../src/classifier.js');
-      const classifier = initClassifier(mockConfig);
+      const result = await initClassifier(mockConfig);
 
       expect(initClassifier).toHaveBeenCalledWith(mockConfig);
-      expect(classifier.getAvailableLabels()).toEqual(['productivity', 'work']);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.getAvailableLabels()).toEqual(['productivity', 'work']);
+      }
     });
   });
 

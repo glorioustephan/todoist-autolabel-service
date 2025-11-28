@@ -14,6 +14,7 @@ import type {
   ClassificationResult,
   LabelDefinition,
 } from '../src/types.js';
+import { asTaskId, asProjectId, asLabelId } from '../src/types.js';
 
 // ============================================
 // Mock Data Factories
@@ -26,7 +27,7 @@ export function createMockConfig(overrides: Partial<Config> = {}): Config {
   return {
     todoistApiToken: 'test-todoist-token',
     anthropicApiKey: 'test-anthropic-key',
-    anthropicModel: 'claude-haiku-4-5-20251001',
+    anthropicModel: 'claude-sonnet-4-5-20250929',
     maxLabelsPerTask: 5,
     pollIntervalMs: 15000,
     maxErrorLogs: 1000,
@@ -42,10 +43,10 @@ export function createMockConfig(overrides: Partial<Config> = {}): Config {
  */
 export function createMockTodoistTask(overrides: Partial<TodoistTask> = {}): TodoistTask {
   return {
-    id: `task-${Math.random().toString(36).substr(2, 9)}`,
+    id: asTaskId(`task-${Math.random().toString(36).substr(2, 9)}`),
     content: 'Test task content',
     description: 'Test task description',
-    projectId: 'inbox-project-id',
+    projectId: asProjectId('inbox-project-id'),
     labels: [],
     priority: 1,
     createdAt: new Date().toISOString(),
@@ -59,7 +60,7 @@ export function createMockTodoistTask(overrides: Partial<TodoistTask> = {}): Tod
  */
 export function createMockTodoistLabel(overrides: Partial<TodoistLabel> = {}): TodoistLabel {
   return {
-    id: `label-${Math.random().toString(36).substr(2, 9)}`,
+    id: asLabelId(`label-${Math.random().toString(36).substr(2, 9)}`),
     name: 'test-label',
     color: 'blue',
     ...overrides,
@@ -71,7 +72,7 @@ export function createMockTodoistLabel(overrides: Partial<TodoistLabel> = {}): T
  */
 export function createMockTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
-    taskId: `task-${Math.random().toString(36).substr(2, 9)}`,
+    taskId: asTaskId(`task-${Math.random().toString(36).substr(2, 9)}`),
     content: 'Test task content',
     status: 'pending',
     labels: null,
@@ -90,7 +91,7 @@ export function createMockTaskRecord(overrides: Partial<TaskRecord> = {}): TaskR
 export function createMockErrorLogRecord(overrides: Partial<ErrorLogRecord> = {}): ErrorLogRecord {
   return {
     id: Math.floor(Math.random() * 1000),
-    taskId: `task-${Math.random().toString(36).substr(2, 9)}`,
+    taskId: asTaskId(`task-${Math.random().toString(36).substr(2, 9)}`),
     errorType: 'TEST_ERROR',
     errorMessage: 'Test error message',
     stackTrace: null,
@@ -104,7 +105,7 @@ export function createMockErrorLogRecord(overrides: Partial<ErrorLogRecord> = {}
  */
 export function createMockClassificationResult(overrides: Partial<ClassificationResult> = {}): ClassificationResult {
   return {
-    taskId: `task-${Math.random().toString(36).substr(2, 9)}`,
+    taskId: asTaskId(`task-${Math.random().toString(36).substr(2, 9)}`),
     labels: ['productivity', 'work'],
     confidence: 0.85,
     rawResponse: '["productivity", "work"]',
@@ -216,6 +217,7 @@ export interface MockClassifier {
   reloadLabels: ReturnType<typeof vi.fn>;
   classifyTask: ReturnType<typeof vi.fn>;
   classifyTasks: ReturnType<typeof vi.fn>;
+  initialize: ReturnType<typeof vi.fn>;
 }
 
 /**
@@ -259,9 +261,9 @@ export function createMockDatabase(): MockDatabase {
  */
 export function createMockTodoistApi(): MockTodoistApi {
   return {
-    initialize: vi.fn(),
-    getInboxProjectId: vi.fn().mockReturnValue('inbox-project-id'),
-    getInboxTasks: vi.fn().mockResolvedValue([]),
+    initialize: vi.fn().mockResolvedValue({ success: true, data: undefined }),
+    getInboxProjectId: vi.fn().mockReturnValue({ success: true, data: 'inbox-project-id' }),
+    getInboxTasks: vi.fn().mockResolvedValue({ success: true, data: [] }),
     getLabels: vi.fn().mockResolvedValue([]),
     updateTaskLabels: vi.fn(),
     getTask: vi.fn(),
@@ -275,9 +277,10 @@ export function createMockTodoistApi(): MockTodoistApi {
 export function createMockClassifier(): MockClassifier {
   return {
     getAvailableLabels: vi.fn().mockReturnValue(['productivity', 'work', 'personal']),
-    reloadLabels: vi.fn(),
+    reloadLabels: vi.fn().mockResolvedValue({ success: true, data: undefined }),
     classifyTask: vi.fn(),
     classifyTasks: vi.fn(),
+    initialize: vi.fn().mockResolvedValue({ success: true, data: undefined }),
   };
 }
 

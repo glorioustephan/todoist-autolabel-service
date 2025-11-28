@@ -52,11 +52,17 @@ export class SyncManager {
       logger.debug('Starting sync cycle');
 
       // Get all inbox tasks
-      const tasks = await api.getInboxTasks();
+      const tasksResult = await api.getInboxTasks();
+      if (!tasksResult.success) {
+        logger.error('Failed to get inbox tasks', new Error(tasksResult.error));
+        return { processed: 0, classified: 0, failed: 0, skipped: 0 };
+      }
+
+      const tasks = tasksResult.data;
       logger.info(`Found ${tasks.length} tasks in Inbox`);
 
       // Filter to tasks that need classification
-      const tasksToProcess = tasks.filter((task) => {
+      const tasksToProcess = tasks.filter((task: TodoistTask) => {
         // Skip completed tasks
         if (task.isCompleted) {
           return false;
@@ -66,7 +72,7 @@ export class SyncManager {
         if (task.labels && task.labels.length > 0) {
           // Update database to mark as skipped if not already tracked
           const existing = db.getTask(task.id);
-          if (!existing) {
+          if (!existing.success) {
             db.upsertTask(task.id, task.content);
             db.markTaskSkipped(task.id);
           }
@@ -75,13 +81,13 @@ export class SyncManager {
 
         // Check database state
         const taskRecord = db.getTask(task.id);
-        if (taskRecord) {
+        if (taskRecord.success) {
           // Skip if already classified or permanently failed
-          if (taskRecord.status === 'classified' || taskRecord.status === 'skipped') {
+          if (taskRecord.data.status === 'classified' || taskRecord.data.status === 'skipped') {
             return false;
           }
           // Skip if max attempts reached
-          if (taskRecord.status === 'failed' || taskRecord.attempts >= MAX_ATTEMPTS) {
+          if (taskRecord.data.status === 'failed' || taskRecord.data.attempts >= MAX_ATTEMPTS) {
             return false;
           }
         }
@@ -145,8 +151,8 @@ export class SyncManager {
     db.upsertTask(task.id, task.content);
 
     // Get current task record
-    const taskRecord = db.getTask(task.id);
-    const attempts = taskRecord?.attempts || 0;
+    const taskRecordResult = db.getTask(task.id);
+    const attempts = taskRecordResult.success ? taskRecordResult.data.attempts : 0;
 
     logger.debug('Processing task', {
       taskId: task.id,
@@ -166,7 +172,20 @@ export class SyncManager {
         availableLabels: classifier.getAvailableLabels(),
       });
 
-      if (result.labels.length === 0) {
+      if (!result.success) {
+        logger.error('Classification failed', new Error(result.error), { taskId: task.id });
+        db.markTaskAttempted(task.id);
+
+        // Check if max attempts reached
+        if (attempts + 1 >= MAX_ATTEMPTS) {
+          db.markTaskFailed(task.id);
+          db.logError('CLASSIFICATION_FAILED', result.error, task.id);
+          return { success: false, skipped: false };
+        }
+        return { success: false, skipped: false };
+      }
+
+      if (result.data.labels.length === 0) {
         logger.warn('No labels assigned to task', { taskId: task.id });
 
         // Check if max attempts reached
@@ -184,14 +203,14 @@ export class SyncManager {
       }
 
       // Apply labels to task in Todoist
-      await api.updateTaskLabels(task.id, result.labels);
+      await api.updateTaskLabels(task.id, [...result.data.labels]);
 
       // Mark as classified in database
-      db.markTaskClassified(task.id, result.labels);
+      db.markTaskClassified(task.id, [...result.data.labels]);
 
       logger.success('Task classified', {
         taskId: task.id,
-        labels: result.labels,
+        labels: result.data.labels,
       });
 
       return { success: true, skipped: false };

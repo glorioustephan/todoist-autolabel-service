@@ -21,6 +21,7 @@ import type {
   SyncStateRecord,
   ServiceStats,
 } from '../src/types.js';
+import { asTaskId, asProjectId, asLabelId } from '../src/types.js';
 
 describe('types.ts - Type Definitions', () => {
   describe('LogLevel Type', () => {
@@ -74,10 +75,10 @@ describe('types.ts - Type Definitions', () => {
   describe('TodoistTask Interface', () => {
     it('should validate TodoistTask structure', () => {
       const mockTask: TodoistTask = {
-        id: 'task-123',
+        id: asTaskId('task-123'),
         content: 'Test task content',
         description: 'Test description',
-        projectId: 'project-456',
+        projectId: asProjectId('project-456'),
         labels: ['label1', 'label2'],
         priority: 2,
         createdAt: '2024-01-01T00:00:00Z',
@@ -104,7 +105,7 @@ describe('types.ts - Type Definitions', () => {
 
     it('should allow null projectId', () => {
       const mockTask: TodoistTask = {
-        id: 'task-123',
+        id: asTaskId('task-123'),
         content: 'Test task content',
         description: 'Test description',
         projectId: null,
@@ -121,7 +122,7 @@ describe('types.ts - Type Definitions', () => {
   describe('TodoistLabel Interface', () => {
     it('should validate TodoistLabel structure', () => {
       const mockLabel: TodoistLabel = {
-        id: 'label-123',
+        id: asLabelId('label-123'),
         name: 'test-label',
         color: 'blue',
       };
@@ -139,7 +140,7 @@ describe('types.ts - Type Definitions', () => {
   describe('TodoistProject Interface', () => {
     it('should validate TodoistProject structure', () => {
       const mockProject: TodoistProject = {
-        id: 'project-123',
+        id: asProjectId('project-123'),
         name: 'Test Project',
         isInboxProject: true,
       };
@@ -192,7 +193,7 @@ describe('types.ts - Type Definitions', () => {
   describe('ClassificationResult Interface', () => {
     it('should validate ClassificationResult structure', () => {
       const mockResult: ClassificationResult = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         labels: ['productivity', 'work'],
         confidence: 0.85,
         rawResponse: '["productivity", "work"]',
@@ -211,7 +212,7 @@ describe('types.ts - Type Definitions', () => {
 
     it('should allow optional confidence and rawResponse', () => {
       const mockResult: ClassificationResult = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         labels: ['productivity'],
       };
 
@@ -225,7 +226,7 @@ describe('types.ts - Type Definitions', () => {
   describe('ClassificationRequest Interface', () => {
     it('should validate ClassificationRequest structure', () => {
       const mockRequest: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test task',
         description: 'Test description',
         availableLabels: ['productivity', 'work'],
@@ -286,7 +287,7 @@ describe('types.ts - Type Definitions', () => {
   describe('TaskRecord Interface', () => {
     it('should validate TaskRecord structure', () => {
       const mockTaskRecord: TaskRecord = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test task content',
         status: 'pending',
         labels: '["productivity"]',
@@ -319,7 +320,7 @@ describe('types.ts - Type Definitions', () => {
 
     it('should allow null labels and timestamps', () => {
       const mockTaskRecord: TaskRecord = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test task content',
         status: 'pending',
         labels: null,
@@ -431,10 +432,10 @@ describe('types.ts - Type Definitions', () => {
 
         tasks: [
           {
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'First task',
             description: 'First description',
-            projectId: 'inbox',
+            projectId: asProjectId('inbox'),
             labels: [],
             priority: 1,
             createdAt: '2024-01-01T00:00:00Z',
@@ -450,7 +451,7 @@ describe('types.ts - Type Definitions', () => {
       };
 
       expect(complexData.config.logLevel).toBe('info');
-      expect(complexData.tasks[0].id).toBe('task-1');
+      expect(complexData.tasks[0]!.id).toBe(asTaskId('task-1'));
       expect(complexData.syncResult.fullSync).toBe(true);
     });
   });

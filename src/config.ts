@@ -7,12 +7,19 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Config, LogLevel } from './types.js';
 
-// Load .env file
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
+
+/**
+ * Resolve a path relative to the project root
+ */
+function resolveFromRoot(...pathSegments: string[]): string {
+  return path.resolve(projectRoot, ...pathSegments);
+}
+
+// Load .env file from project root
+dotenv.config({ path: resolveFromRoot('.env') });
 
 /**
  * Validates that a required environment variable is set
@@ -72,11 +79,11 @@ export function loadConfig(): Config {
     // Service configuration
     pollIntervalMs: getEnvNumber('POLL_INTERVAL_MS', 15000),
     maxErrorLogs: getEnvNumber('MAX_ERROR_LOGS', 1000),
-    dbPath: getEnv('DB_PATH', path.join(projectRoot, 'data', 'todoist.db')),
+    dbPath: getEnv('DB_PATH', resolveFromRoot('data', 'todoist.db')),
     logLevel: validateLogLevel(getEnv('LOG_LEVEL', 'info')),
 
     // Paths
-    labelsPath: path.join(projectRoot, 'labels.json'),
+    labelsPath: resolveFromRoot('labels.json'),
   };
 }
 

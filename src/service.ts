@@ -41,7 +41,11 @@ async function initialize(): Promise<void> {
 
   // Initialize classifier
   logger.info('Initializing Claude classifier', { model: config.anthropicModel });
-  const classifier = initClassifier(config);
+  const classifierResult = await initClassifier(config);
+  if (!classifierResult.success) {
+    throw new Error(`Failed to initialize classifier: ${classifierResult.error}`);
+  }
+  const classifier = classifierResult.data;
   logger.info(`Loaded ${classifier.getAvailableLabels().length} labels`);
 
   // Initialize sync manager
@@ -124,7 +128,9 @@ async function shutdown(signal: string): Promise<void> {
   }
 
   logger.info('Service shutdown complete');
-  process.exit(0);
+
+  // Let the process exit naturally instead of forcing it
+  // This allows any cleanup handlers to run properly
 }
 
 /**
@@ -161,9 +167,10 @@ async function main(): Promise<void> {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 
     // Handle uncaught errors
-    process.on('uncaughtException', (error) => {
+    process.on('uncaughtException', async (error) => {
       logger.error('Uncaught exception', error);
-      shutdown('uncaughtException');
+      await shutdown('uncaughtException');
+      process.exit(1); // Force exit for uncaught exceptions
     });
 
     process.on('unhandledRejection', (reason) => {

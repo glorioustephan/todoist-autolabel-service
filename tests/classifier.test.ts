@@ -3,7 +3,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs';
 import {
   TaskClassifier,
   loadLabels,
@@ -18,17 +17,23 @@ import {
   createNetworkError,
   type MockLogger,
 } from './test-utils.js';
-import type { Config, ClassificationRequest } from '../src/types.js';
+import { type Config, type ClassificationRequest, asTaskId } from '../src/types.js';
 
-// Mock Anthropic SDK with beta.messages.create for Structured Outputs
-const mockBetaMessagesCreate = vi.fn();
-const mockAnthropicClient = {
-  beta: {
-    messages: {
-      create: mockBetaMessagesCreate,
+// Create hoisted mocks that can be accessed inside vi.mock factories
+const { mockReadFile, mockBetaMessagesCreate, mockAnthropicClient } = vi.hoisted(() => {
+  const mockBetaMessagesCreate = vi.fn();
+  return {
+    mockReadFile: vi.fn(),
+    mockBetaMessagesCreate,
+    mockAnthropicClient: {
+      beta: {
+        messages: {
+          create: mockBetaMessagesCreate,
+        },
+      },
     },
-  },
-};
+  };
+});
 
 vi.mock('@anthropic-ai/sdk', () => {
   return {
@@ -36,10 +41,10 @@ vi.mock('@anthropic-ai/sdk', () => {
   };
 });
 
-// Mock fs
+// Mock fs/promises
 vi.mock('fs', () => ({
-  default: {
-    readFileSync: vi.fn(),
+  promises: {
+    readFile: mockReadFile,
   },
 }));
 
@@ -80,40 +85,49 @@ describe('classifier.ts - Claude AI Classification', () => {
   });
 
   describe('loadLabels()', () => {
-    it('should load and return label names from valid JSON file', () => {
+    it('should load and return label names from valid JSON file', async () => {
       const mockLabels = createMockLabels();
       const labelsConfig = { labels: mockLabels };
 
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(labelsConfig));
+      mockReadFile.mockResolvedValue(JSON.stringify(labelsConfig));
 
-      const labels = loadLabels('/path/to/labels.json');
+      const result = await loadLabels('/path/to/labels.json');
 
-      expect(fs.readFileSync).toHaveBeenCalledWith('/path/to/labels.json', 'utf-8');
-      expect(labels).toEqual(['productivity', 'work', 'personal', 'health', 'finance']);
+      expect(mockReadFile).toHaveBeenCalledWith('/path/to/labels.json', 'utf-8');
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual(['productivity', 'work', 'personal', 'health', 'finance']);
+      }
       expect(mockLogger.debug).toHaveBeenCalledWith(
         'Loaded 5 labels from /path/to/labels.json'
       );
     });
 
-    it('should handle empty labels array', () => {
+    it('should handle empty labels array', async () => {
       const labelsConfig = { labels: [] };
 
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(labelsConfig));
+      mockReadFile.mockResolvedValue(JSON.stringify(labelsConfig));
 
-      const labels = loadLabels('/path/to/labels.json');
+      const result = await loadLabels('/path/to/labels.json');
 
-      expect(labels).toEqual([]);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual([]);
+      }
       expect(mockLogger.debug).toHaveBeenCalledWith(
         'Loaded 0 labels from /path/to/labels.json'
       );
     });
 
-    it('should throw error for invalid JSON', () => {
-      vi.mocked(fs.readFileSync).mockReturnValue('invalid json {');
+    it('should return error for invalid JSON', async () => {
+      mockReadFile.mockResolvedValue('invalid json {');
 
-      expect(() => {
-        loadLabels('/path/to/invalid.json');
-      }).toThrow();
+      const result = await loadLabels('/path/to/invalid.json');
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('Failed to load labels');
+      }
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Failed to load labels',
         expect.any(Error),
@@ -121,35 +135,42 @@ describe('classifier.ts - Claude AI Classification', () => {
       );
     });
 
-    it('should throw error for missing labels property', () => {
+    it('should return error for missing labels property', async () => {
       const invalidConfig = { notLabels: [] };
 
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(invalidConfig));
+      mockReadFile.mockResolvedValue(JSON.stringify(invalidConfig));
 
-      expect(() => {
-        loadLabels('/path/to/labels.json');
-      }).toThrow('Invalid labels.json: missing "labels" array');
+      const result = await loadLabels('/path/to/labels.json');
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('Invalid labels.json');
+      }
     });
 
-    it('should throw error for non-array labels property', () => {
+    it('should return error for non-array labels property', async () => {
       const invalidConfig = { labels: 'not-an-array' };
 
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(invalidConfig));
+      mockReadFile.mockResolvedValue(JSON.stringify(invalidConfig));
 
-      expect(() => {
-        loadLabels('/path/to/labels.json');
-      }).toThrow('Invalid labels.json: missing "labels" array');
+      const result = await loadLabels('/path/to/labels.json');
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('Invalid labels.json');
+      }
     });
 
-    it('should handle file read errors', () => {
+    it('should handle file read errors', async () => {
       const readError = new Error('File not found');
-      vi.mocked(fs.readFileSync).mockImplementation(() => {
-        throw readError;
-      });
+      mockReadFile.mockRejectedValue(readError);
 
-      expect(() => {
-        loadLabels('/nonexistent/path.json');
-      }).toThrow('File not found');
+      const result = await loadLabels('/nonexistent/path.json');
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('File not found');
+      }
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Failed to load labels',
         readError,
@@ -161,19 +182,26 @@ describe('classifier.ts - Claude AI Classification', () => {
   describe('TaskClassifier Class', () => {
     let classifier: TaskClassifier;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       // Mock successful label loading
       const mockLabels = createMockLabels();
-      vi.mocked(fs.readFileSync).mockReturnValue(
+      mockReadFile.mockResolvedValue(
         JSON.stringify({ labels: mockLabels })
       );
 
       classifier = new TaskClassifier(config);
+      await classifier.initialize();
     });
 
     describe('Constructor', () => {
-      it('should initialize with config and load labels', async () => {
-        expect(fs.readFileSync).toHaveBeenCalledWith(config.labelsPath, 'utf-8');
+      it('should initialize with config and load labels on initialize()', async () => {
+        // Reset and create fresh classifier
+        const newClassifier = new TaskClassifier(config);
+        mockReadFile.mockClear();
+        
+        await newClassifier.initialize();
+        
+        expect(mockReadFile).toHaveBeenCalledWith(config.labelsPath, 'utf-8');
 
         const anthropicModule = await import('@anthropic-ai/sdk');
         const mockAnthropic = vi.mocked(anthropicModule.default);
@@ -189,36 +217,36 @@ describe('classifier.ts - Claude AI Classification', () => {
         const labels2 = classifier.getAvailableLabels();
 
         expect(labels1).toEqual(['productivity', 'work', 'personal', 'health', 'finance']);
-        expect(labels1).not.toBe(labels2); // Should be different instances
-        expect(labels1).toEqual(labels2); // But same content
+        // Both should reference the same readonly array
+        expect(labels1).toEqual(labels2);
       });
     });
 
     describe('reloadLabels()', () => {
-      it('should reload labels from file', () => {
+      it('should reload labels from file', async () => {
         const newLabels = [
           { name: 'new-label-1', color: 'red' },
           { name: 'new-label-2', color: 'blue' },
         ];
 
-        vi.mocked(fs.readFileSync).mockReturnValue(
+        mockReadFile.mockResolvedValue(
           JSON.stringify({ labels: newLabels })
         );
 
-        classifier.reloadLabels();
+        await classifier.reloadLabels();
 
         expect(classifier.getAvailableLabels()).toEqual(['new-label-1', 'new-label-2']);
-        expect(fs.readFileSync).toHaveBeenCalledTimes(2); // Initial + reload
       });
 
-      it('should handle reload errors gracefully', () => {
-        vi.mocked(fs.readFileSync).mockImplementationOnce(() => {
-          throw new Error('File access denied');
-        });
+      it('should handle reload errors gracefully', async () => {
+        mockReadFile.mockRejectedValue(new Error('File access denied'));
 
-        expect(() => {
-          classifier.reloadLabels();
-        }).toThrow('File access denied');
+        const result = await classifier.reloadLabels();
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error).toContain('File access denied');
+        }
       });
     });
 
@@ -227,7 +255,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       beforeEach(() => {
         classificationRequest = {
-          taskId: 'task-123',
+          taskId: asTaskId('task-123'),
           content: 'Complete project documentation',
           description: 'Write comprehensive docs for the new API',
           availableLabels: ['productivity', 'work', 'documentation'],
@@ -276,11 +304,14 @@ describe('classifier.ts - Claude AI Classification', () => {
           },
         });
 
-        expect(result).toEqual({
-          taskId: 'task-123',
-          labels: ['productivity', 'work'],
-          rawResponse: '{"labels": ["productivity", "work"]}',
-        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data).toEqual({
+            taskId: 'task-123',
+            labels: ['productivity', 'work'],
+            rawResponse: '{"labels": ["productivity", "work"]}',
+          });
+        }
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
           'Classifying task',
@@ -297,7 +328,10 @@ describe('classifier.ts - Claude AI Classification', () => {
       });
 
       it('should use default labels when availableLabels is empty', async () => {
-        classificationRequest.availableLabels = [];
+        const requestWithEmptyLabels: ClassificationRequest = {
+          ...classificationRequest,
+          availableLabels: [],
+        };
 
         const mockResponse = {
           stop_reason: 'end_turn',
@@ -305,10 +339,10 @@ describe('classifier.ts - Claude AI Classification', () => {
         };
         mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-        await classifier.classifyTask(classificationRequest);
+        await classifier.classifyTask(requestWithEmptyLabels);
 
         // Should use all available labels from classifier
-        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
         expect(callArgs.messages[0].content).toContain('productivity');
         expect(callArgs.messages[0].content).toContain('work');
         expect(callArgs.messages[0].content).toContain('personal');
@@ -318,7 +352,10 @@ describe('classifier.ts - Claude AI Classification', () => {
       });
 
       it('should handle empty task description', async () => {
-        classificationRequest.description = '';
+        const requestWithEmptyDesc: ClassificationRequest = {
+          ...classificationRequest,
+          description: '',
+        };
 
         const mockResponse = {
           stop_reason: 'end_turn',
@@ -326,9 +363,9 @@ describe('classifier.ts - Claude AI Classification', () => {
         };
         mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-        await classifier.classifyTask(classificationRequest);
+        await classifier.classifyTask(requestWithEmptyDesc);
 
-        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
         expect(callArgs.messages[0].content).toContain('Complete project documentation');
         expect(callArgs.messages[0].content).not.toContain('Description:');
       });
@@ -348,8 +385,11 @@ describe('classifier.ts - Claude AI Classification', () => {
         const result = await classifier.classifyTask(classificationRequest);
 
         // Should be limited to 3 labels (maxLabelsPerTask)
-        expect(result.labels).toHaveLength(3);
-        expect(result.labels).toEqual(['productivity', 'work', 'documentation']);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toHaveLength(3);
+          expect(result.data.labels).toEqual(['productivity', 'work', 'documentation']);
+        }
       });
 
       it('should handle structured output with valid labels only', async () => {
@@ -367,7 +407,10 @@ describe('classifier.ts - Claude AI Classification', () => {
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        expect(result.labels).toEqual(['productivity', 'work']);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toEqual(['productivity', 'work']);
+        }
       });
 
       it('should handle empty labels in structured response', async () => {
@@ -384,7 +427,10 @@ describe('classifier.ts - Claude AI Classification', () => {
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        expect(result.labels).toEqual([]);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toEqual([]);
+        }
       });
 
       it('should handle refusal response', async () => {
@@ -401,15 +447,18 @@ describe('classifier.ts - Claude AI Classification', () => {
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        expect(result.labels).toEqual([]);
-        expect(result.rawResponse).toBe('Model refused to classify this task');
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toEqual([]);
+          expect(result.data.rawResponse).toBe('Model refused to classify this task');
+        }
         expect(mockLogger.warn).toHaveBeenCalledWith(
           'Classification refused by model',
           { taskId: 'task-123' }
         );
       });
 
-      it('should handle JSON parse error gracefully', async () => {
+      it('should return error for JSON parse error', async () => {
         const mockResponse = {
           stop_reason: 'end_turn',
           content: [
@@ -421,16 +470,24 @@ describe('classifier.ts - Claude AI Classification', () => {
         };
         mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-        await expect(classifier.classifyTask(classificationRequest)).rejects.toThrow();
+        const result = await classifier.classifyTask(classificationRequest);
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error).toContain('Classification failed');
+        }
       });
 
-      it('should handle API errors', async () => {
+      it('should return error for API errors', async () => {
         const apiError = createNetworkError();
         mockBetaMessagesCreate.mockRejectedValue(apiError);
 
-        await expect(classifier.classifyTask(classificationRequest)).rejects.toThrow(
-          'Network request failed'
-        );
+        const result = await classifier.classifyTask(classificationRequest);
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error).toContain('Network request failed');
+        }
 
         expect(mockLogger.error).toHaveBeenCalledWith(
           'Classification failed',
@@ -453,13 +510,16 @@ describe('classifier.ts - Claude AI Classification', () => {
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        expect(result.labels).toEqual([]);
-        expect(result.rawResponse).toBe('{"labels":[]}');
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toEqual([]);
+          expect(result.data.rawResponse).toBe('{"labels":[]}');
+        }
       });
 
       it('should build comprehensive prompt with all task details', async () => {
         const detailedRequest: ClassificationRequest = {
-          taskId: 'task-456',
+          taskId: asTaskId('task-456'),
           content: 'Buy groceries for dinner party',
           description: 'Need to get ingredients for Italian cuisine: pasta, tomatoes, cheese',
           availableLabels: ['shopping', 'food', 'social'],
@@ -473,7 +533,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
         await classifier.classifyTask(detailedRequest);
 
-        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
         const prompt = callArgs.messages[0].content;
 
         expect(prompt).toContain('Buy groceries for dinner party');
@@ -484,7 +544,10 @@ describe('classifier.ts - Claude AI Classification', () => {
       });
 
       it('should handle edge case with empty available labels list', async () => {
-        classificationRequest.availableLabels = [];
+        const requestWithEmptyLabels: ClassificationRequest = {
+          ...classificationRequest,
+          availableLabels: [],
+        };
 
         const mockResponse = {
           stop_reason: 'end_turn',
@@ -492,9 +555,12 @@ describe('classifier.ts - Claude AI Classification', () => {
         };
         mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-        const result = await classifier.classifyTask(classificationRequest);
+        const result = await classifier.classifyTask(requestWithEmptyLabels);
 
-        expect(result.labels).toEqual(['productivity']);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.labels).toEqual(['productivity']);
+        }
       });
     });
 
@@ -502,13 +568,13 @@ describe('classifier.ts - Claude AI Classification', () => {
       it('should classify multiple tasks and return results', async () => {
         const requests: ClassificationRequest[] = [
           {
-            taskId: 'task-1',
+            taskId: asTaskId('task-1'),
             content: 'Write documentation',
             description: '',
             availableLabels: ['productivity', 'work'],
           },
           {
-            taskId: 'task-2',
+            taskId: asTaskId('task-2'),
             content: 'Exercise routine',
             description: 'Morning workout',
             availableLabels: ['health', 'personal'],
@@ -543,13 +609,13 @@ describe('classifier.ts - Claude AI Classification', () => {
       it('should handle individual task failures gracefully', async () => {
         const requests: ClassificationRequest[] = [
           {
-            taskId: 'task-1',
+            taskId: asTaskId('task-1'),
             content: 'Successful task',
             description: '',
             availableLabels: ['productivity'],
           },
           {
-            taskId: 'task-2',
+            taskId: asTaskId('task-2'),
             content: 'Failing task',
             description: '',
             availableLabels: ['work'],
@@ -572,10 +638,11 @@ describe('classifier.ts - Claude AI Classification', () => {
           labels: ['productivity'],
           rawResponse: '{"labels": ["productivity"]}',
         });
+        // Failed task returns with error message as rawResponse
         expect(results[1]).toEqual({
           taskId: 'task-2',
           labels: [],
-          rawResponse: 'Network request failed',
+          rawResponse: expect.stringContaining('Network request failed'),
         });
       });
 
@@ -592,24 +659,31 @@ describe('classifier.ts - Claude AI Classification', () => {
     beforeEach(() => {
       // Mock successful label loading
       const mockLabels = createMockLabels();
-      vi.mocked(fs.readFileSync).mockReturnValue(
+      mockReadFile.mockResolvedValue(
         JSON.stringify({ labels: mockLabels })
       );
     });
 
     describe('initClassifier()', () => {
-      it('should create classifier instance', () => {
-        const classifier = initClassifier(config);
+      it('should create classifier instance', async () => {
+        const result = await initClassifier(config);
 
-        expect(classifier).toBeInstanceOf(TaskClassifier);
-        expect(fs.readFileSync).toHaveBeenCalledWith(config.labelsPath, 'utf-8');
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data).toBeInstanceOf(TaskClassifier);
+        }
+        expect(mockReadFile).toHaveBeenCalledWith(config.labelsPath, 'utf-8');
       });
 
-      it('should return same instance on subsequent calls', () => {
-        const classifier1 = initClassifier(config);
-        const classifier2 = initClassifier(config);
+      it('should return same instance on subsequent calls', async () => {
+        const result1 = await initClassifier(config);
+        const result2 = await initClassifier(config);
 
-        expect(classifier1).toBe(classifier2);
+        expect(result1.success).toBe(true);
+        expect(result2.success).toBe(true);
+        if (result1.success && result2.success) {
+          expect(result1.data).toBe(result2.data);
+        }
       });
     });
 
@@ -622,17 +696,21 @@ describe('classifier.ts - Claude AI Classification', () => {
         }).toThrow('Classifier not initialized. Call initClassifier first.');
       });
 
-      it('should return initialized classifier', () => {
-        const initializedClassifier = initClassifier(config);
+      it('should return initialized classifier', async () => {
+        const initResult = await initClassifier(config);
+        expect(initResult.success).toBe(true);
+
         const retrievedClassifier = getClassifier();
 
-        expect(retrievedClassifier).toBe(initializedClassifier);
+        if (initResult.success) {
+          expect(retrievedClassifier).toBe(initResult.data);
+        }
       });
     });
 
     describe('resetClassifier()', () => {
-      it('should reset classifier instance', () => {
-        initClassifier(config);
+      it('should reset classifier instance', async () => {
+        await initClassifier(config);
         resetClassifier();
 
         expect(() => {
@@ -640,12 +718,15 @@ describe('classifier.ts - Claude AI Classification', () => {
         }).toThrow('Classifier not initialized');
       });
 
-      it('should allow reinitialization after reset', () => {
-        initClassifier(config);
+      it('should allow reinitialization after reset', async () => {
+        await initClassifier(config);
         resetClassifier();
 
-        const newClassifier = initClassifier(config);
-        expect(newClassifier).toBeInstanceOf(TaskClassifier);
+        const result = await initClassifier(config);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data).toBeInstanceOf(TaskClassifier);
+        }
       });
     });
   });
@@ -653,22 +734,23 @@ describe('classifier.ts - Claude AI Classification', () => {
   describe('Prompt Building and Response Parsing', () => {
     let classifier: TaskClassifier;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       const mockLabels = [
         { name: 'productivity', color: 'blue' },
         { name: 'urgent', color: 'red' },
         { name: 'work', color: 'green' },
       ];
-      vi.mocked(fs.readFileSync).mockReturnValue(
+      mockReadFile.mockResolvedValue(
         JSON.stringify({ labels: mockLabels })
       );
 
       classifier = new TaskClassifier(config);
+      await classifier.initialize();
     });
 
     it('should handle special characters in task content', async () => {
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Task with "quotes" and & special chars <script>',
         description: 'Description with newlines\nand tabs\t',
         availableLabels: ['productivity', 'work'],
@@ -682,7 +764,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       await classifier.classifyTask(request);
 
-      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
       const prompt = callArgs.messages[0].content;
 
       expect(prompt).toContain('Task with "quotes" and & special chars <script>');
@@ -692,7 +774,7 @@ describe('classifier.ts - Claude AI Classification', () => {
     it('should handle very long task content', async () => {
       const longContent = 'A'.repeat(10000);
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: longContent,
         description: '',
         availableLabels: ['productivity'],
@@ -706,7 +788,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       await classifier.classifyTask(request);
 
-      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
       expect(callArgs.messages[0].content).toContain(longContent);
     });
 
@@ -718,7 +800,7 @@ describe('classifier.ts - Claude AI Classification', () => {
       mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Write API docs',
         description: '',
         availableLabels: ['productivity', 'work', 'documentation'],
@@ -726,12 +808,15 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       const result = await classifier.classifyTask(request);
 
-      expect(result.labels).toEqual(['productivity', 'work']);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.labels).toEqual(['productivity', 'work']);
+      }
     });
 
     it('should include enum constraint in schema', async () => {
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Urgent documentation',
         description: '',
         availableLabels: ['productivity', 'work', 'urgent'],
@@ -745,7 +830,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       await classifier.classifyTask(request);
 
-      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
       expect(callArgs.output_format.schema.properties.labels.items.enum).toEqual([
         'productivity', 'work', 'urgent'
       ]);
@@ -759,7 +844,7 @@ describe('classifier.ts - Claude AI Classification', () => {
       mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+          taskId: asTaskId('task-123'),
         content: 'Important task',
         description: '',
         availableLabels: ['productivity', 'urgent'],
@@ -767,7 +852,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       await classifier.classifyTask(request);
 
-      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      const callArgs = mockBetaMessagesCreate.mock.calls[0]![0];
       expect(callArgs.system).toContain('task classification assistant');
       expect(callArgs.system).toContain('1-5 labels');
     });
@@ -776,13 +861,14 @@ describe('classifier.ts - Claude AI Classification', () => {
   describe('Error Recovery and Edge Cases', () => {
     let classifier: TaskClassifier;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       const mockLabels = createMockLabels();
-      vi.mocked(fs.readFileSync).mockReturnValue(
+      mockReadFile.mockResolvedValue(
         JSON.stringify({ labels: mockLabels })
       );
 
       classifier = new TaskClassifier(config);
+      await classifier.initialize();
     });
 
     it('should handle rate limiting with exponential backoff simulation', async () => {
@@ -792,13 +878,18 @@ describe('classifier.ts - Claude AI Classification', () => {
       mockBetaMessagesCreate.mockRejectedValueOnce(rateLimitError);
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test task',
         description: '',
         availableLabels: ['productivity'],
       };
 
-      await expect(classifier.classifyTask(request)).rejects.toThrow('Rate limit exceeded');
+      const result = await classifier.classifyTask(request);
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('Rate limit exceeded');
+      }
     });
 
     it('should handle authentication errors', async () => {
@@ -808,20 +899,25 @@ describe('classifier.ts - Claude AI Classification', () => {
       mockBetaMessagesCreate.mockRejectedValue(authError);
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test task',
         description: '',
         availableLabels: ['productivity'],
       };
 
-      await expect(classifier.classifyTask(request)).rejects.toThrow('Invalid API key');
+      const result = await classifier.classifyTask(request);
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('Invalid API key');
+      }
     });
 
     it('should handle very large label lists', async () => {
       const manyLabels = Array.from({ length: 1000 }, (_, i) => `label-${i}`);
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Test with many labels',
         description: '',
         availableLabels: manyLabels,
@@ -835,14 +931,17 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       const result = await classifier.classifyTask(request);
 
-      expect(result.labels).toHaveLength(3);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.labels).toHaveLength(3);
+      }
     });
 
     it('should handle Unicode labels correctly', async () => {
       const unicodeLabels = ['工作', '生产力', '紧急', 'émojis🚀'];
 
       const request: ClassificationRequest = {
-        taskId: 'task-123',
+        taskId: asTaskId('task-123'),
         content: 'Unicode test task',
         description: '',
         availableLabels: unicodeLabels,
@@ -856,7 +955,10 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       const result = await classifier.classifyTask(request);
 
-      expect(result.labels).toEqual(['工作', 'émojis🚀']);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.labels).toEqual(['工作', 'émojis🚀']);
+      }
     });
   });
 });

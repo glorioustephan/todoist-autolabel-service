@@ -3,6 +3,25 @@
  */
 
 // ============================================
+// Branded Types for Type Safety
+// ============================================
+
+declare const __brand: unique symbol;
+
+export type Brand<T, U> = T & { [__brand]: U };
+
+export type TaskId = Brand<string, 'TaskId'>;
+export type ProjectId = Brand<string, 'ProjectId'>;
+export type LabelId = Brand<string, 'LabelId'>;
+export type SyncToken = Brand<string, 'SyncToken'>;
+
+// Branded type casting functions
+export const asTaskId = (id: string): TaskId => id as TaskId;
+export const asProjectId = (id: string): ProjectId => id as ProjectId;
+export const asLabelId = (id: string): LabelId => id as LabelId;
+export const asSyncToken = (token: string): SyncToken => token as SyncToken;
+
+// ============================================
 // Configuration Types
 // ============================================
 
@@ -10,21 +29,21 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface Config {
   // Required
-  todoistApiToken: string;
-  anthropicApiKey: string;
+  readonly todoistApiToken: string;
+  readonly anthropicApiKey: string;
 
   // Claude configuration
-  anthropicModel: string;
-  maxLabelsPerTask: number;
+  readonly anthropicModel: string;
+  readonly maxLabelsPerTask: number;
 
   // Service configuration
-  pollIntervalMs: number;
-  maxErrorLogs: number;
-  dbPath: string;
-  logLevel: LogLevel;
+  readonly pollIntervalMs: number;
+  readonly maxErrorLogs: number;
+  readonly dbPath: string;
+  readonly logLevel: LogLevel;
 
   // Paths
-  labelsPath: string;
+  readonly labelsPath: string;
 }
 
 // ============================================
@@ -32,26 +51,26 @@ export interface Config {
 // ============================================
 
 export interface TodoistTask {
-  id: string;
-  content: string;
-  description: string;
-  projectId: string | null;
-  labels: string[];
-  priority: number;
-  createdAt: string;
-  isCompleted: boolean;
+  readonly id: TaskId;
+  readonly content: string;
+  readonly description: string;
+  readonly projectId: ProjectId | null;
+  readonly labels: readonly string[];
+  readonly priority: number;
+  readonly createdAt: string;
+  readonly isCompleted: boolean;
 }
 
 export interface TodoistProject {
-  id: string;
-  name: string;
-  isInboxProject: boolean;
+  readonly id: ProjectId;
+  readonly name: string;
+  readonly isInboxProject: boolean;
 }
 
 export interface TodoistLabel {
-  id: string;
-  name: string;
-  color: string;
+  readonly id: LabelId;
+  readonly name: string;
+  readonly color: string;
 }
 
 // ============================================
@@ -68,21 +87,40 @@ export interface LabelsConfig {
 }
 
 // ============================================
+// Result Types for Error Handling
+// ============================================
+
+export type Result<T, E = Error> = Ok<T> | Err<E>;
+
+export interface Ok<T> {
+  readonly success: true;
+  readonly data: T;
+}
+
+export interface Err<E> {
+  readonly success: false;
+  readonly error: E;
+}
+
+export const ok = <T>(data: T): Ok<T> => ({ success: true, data });
+export const err = <E>(error: E): Err<E> => ({ success: false, error });
+
+// ============================================
 // Classification Types
 // ============================================
 
 export interface ClassificationResult {
-  taskId: string;
-  labels: string[];
-  confidence?: number;
-  rawResponse?: string;
+  readonly taskId: TaskId;
+  readonly labels: readonly string[];
+  readonly confidence?: number;
+  readonly rawResponse?: string;
 }
 
 export interface ClassificationRequest {
-  taskId: string;
-  content: string;
-  description: string;
-  availableLabels: string[];
+  readonly taskId: TaskId;
+  readonly content: string;
+  readonly description: string;
+  readonly availableLabels: readonly string[];
 }
 
 // ============================================

@@ -19,6 +19,7 @@ import {
   type MockClassifier,
 } from './test-utils.js';
 import type { Config, TodoistTask, TaskRecord } from '../src/types.js';
+import { asTaskId } from '../src/types.js';
 
 // Mock all dependencies
 vi.mock('../src/logger.js', () => ({
@@ -97,11 +98,11 @@ describe('sync.ts - Sync Orchestration', () => {
       }
     });
 
-    // Set up default mock returns
-    mockDb.getTask.mockReturnValue(null);
+    // Set up default mock returns - using Result types
+    mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
     mockDb.getTasksByStatus.mockReturnValue([]);
     mockDb.getPendingRetryableTasks.mockReturnValue([]);
-    mockApi.getInboxTasks.mockResolvedValue([]);
+    mockApi.getInboxTasks.mockResolvedValue({ success: true, data: [] });
     mockClassifier.getAvailableLabels.mockReturnValue(['productivity', 'work', 'personal']);
   });
 
@@ -118,13 +119,13 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should process new tasks without labels successfully', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'New task without labels',
             labels: [],
             isCompleted: false,
           }),
           createMockTodoistTask({
-            id: 'task-2',
+            id: asTaskId('task-2'),
             content: 'Another new task',
             labels: [],
             isCompleted: false,
@@ -133,20 +134,20 @@ describe('sync.ts - Sync Orchestration', () => {
 
         const mockClassificationResults = [
           createMockClassificationResult({
-            taskId: 'task-1',
+            taskId: asTaskId('task-1'),
             labels: ['productivity', 'work'],
           }),
           createMockClassificationResult({
-            taskId: 'task-2',
+            taskId: asTaskId('task-2'),
             labels: ['personal'],
           }),
         ];
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(null); // No existing records
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' }); // No existing records
         mockClassifier.classifyTask
-          .mockResolvedValueOnce(mockClassificationResults[0])
-          .mockResolvedValueOnce(mockClassificationResults[1]);
+          .mockResolvedValueOnce({ success: true, data: mockClassificationResults[0] })
+          .mockResolvedValueOnce({ success: true, data: mockClassificationResults[1] });
 
         const stats = await syncManager.sync();
 
@@ -160,13 +161,13 @@ describe('sync.ts - Sync Orchestration', () => {
         // Verify API calls
         expect(mockApi.getInboxTasks).toHaveBeenCalled();
         expect(mockClassifier.classifyTask).toHaveBeenCalledTimes(2);
-        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('task-1', ['productivity', 'work']);
-        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('task-2', ['personal']);
+        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('task-1'), ['productivity', 'work']);
+        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('task-2'), ['personal']);
 
         // Verify database operations
         expect(mockDb.upsertTask).toHaveBeenCalledTimes(2);
-        expect(mockDb.markTaskClassified).toHaveBeenCalledWith('task-1', ['productivity', 'work']);
-        expect(mockDb.markTaskClassified).toHaveBeenCalledWith('task-2', ['personal']);
+        expect(mockDb.markTaskClassified).toHaveBeenCalledWith(asTaskId('task-1'), ['productivity', 'work']);
+        expect(mockDb.markTaskClassified).toHaveBeenCalledWith(asTaskId('task-2'), ['personal']);
         expect(mockDb.saveLastSyncAt).toHaveBeenCalled();
 
         // Verify logging
@@ -174,7 +175,7 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(mockLogger.info).toHaveBeenCalledWith('2 tasks need classification');
         expect(mockLogger.success).toHaveBeenCalledWith(
           'Task classified',
-          { taskId: 'task-1', labels: ['productivity', 'work'] }
+          { taskId: asTaskId('task-1'), labels: ['productivity', 'work'] }
         );
         expect(mockLogger.info).toHaveBeenCalledWith('Sync cycle completed', stats);
       });
@@ -182,22 +183,22 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should skip completed tasks', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Completed task',
             isCompleted: true,
             labels: [],
           }),
           createMockTodoistTask({
-            id: 'task-2',
+            id: asTaskId('task-2'),
             content: 'Active task',
             isCompleted: false,
             labels: [],
           }),
         ];
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-2', labels: ['work'] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-2'), labels: ['work'] }) }
         );
 
         const stats = await syncManager.sync();
@@ -205,7 +206,7 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(stats.processed).toBe(1); // Only the active task
         expect(mockClassifier.classifyTask).toHaveBeenCalledOnce();
         expect(mockClassifier.classifyTask).toHaveBeenCalledWith({
-          taskId: 'task-2',
+          taskId: asTaskId('task-2'),
           content: 'Active task',
           description: expect.any(String),
           availableLabels: ['productivity', 'work', 'personal'],
@@ -215,23 +216,23 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should skip tasks that already have labels', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task with existing labels',
             labels: ['existing-label'],
             isCompleted: false,
           }),
           createMockTodoistTask({
-            id: 'task-2',
+            id: asTaskId('task-2'),
             content: 'Task without labels',
             labels: [],
             isCompleted: false,
           }),
         ];
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(null); // No existing database records
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' }); // No existing database records
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-2', labels: ['work'] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-2'), labels: ['work'] }) }
         );
 
         const stats = await syncManager.sync();
@@ -240,14 +241,14 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(stats.skipped).toBe(0); // Skipped tasks aren't counted in processed
 
         // Verify task with existing labels was marked as skipped in database
-        expect(mockDb.upsertTask).toHaveBeenCalledWith('task-1', 'Task with existing labels');
-        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith('task-1');
+        expect(mockDb.upsertTask).toHaveBeenCalledWith(asTaskId('task-1'), 'Task with existing labels');
+        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith(asTaskId('task-1'));
       });
 
       it('should skip tasks that are already classified', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Already classified task',
             labels: [],
             isCompleted: false,
@@ -255,13 +256,13 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const existingTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'classified',
           attempts: 1,
         });
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(existingTaskRecord);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: existingTaskRecord });
 
         const stats = await syncManager.sync();
 
@@ -272,7 +273,7 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should skip tasks that have reached max attempts', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Failed task with max attempts',
             labels: [],
             isCompleted: false,
@@ -280,13 +281,13 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const failedTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'failed',
           attempts: 3,
         });
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(failedTaskRecord);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: failedTaskRecord });
 
         const stats = await syncManager.sync();
 
@@ -297,7 +298,7 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should retry pending tasks with attempts < 3', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Retry-able task',
             labels: [],
             isCompleted: false,
@@ -305,15 +306,15 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const pendingTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'pending',
           attempts: 2,
         });
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(pendingTaskRecord);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: pendingTaskRecord });
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-1', labels: ['work'] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-1'), labels: ['work'] }) }
         );
 
         const stats = await syncManager.sync();
@@ -326,7 +327,7 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should handle classification with no labels (retry logic)', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task that gets no labels',
             labels: [],
             isCompleted: false,
@@ -334,15 +335,15 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const existingTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'pending',
           attempts: 1,
         });
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(existingTaskRecord);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: existingTaskRecord });
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-1', labels: [] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-1'), labels: [] }) }
         );
 
         const stats = await syncManager.sync();
@@ -351,10 +352,10 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(stats.classified).toBe(0);
         expect(stats.failed).toBe(1); // Counted as failed in stats even though not permanently failed
 
-        expect(mockDb.markTaskAttempted).toHaveBeenCalledWith('task-1');
+        expect(mockDb.markTaskAttempted).toHaveBeenCalledWith(asTaskId('task-1'));
         expect(mockLogger.warn).toHaveBeenCalledWith(
           'No labels assigned to task',
-          { taskId: 'task-1' }
+          { taskId: asTaskId('task-1') }
         );
 
         // Should not mark as failed or update labels
@@ -365,7 +366,7 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should mark task as failed after max attempts with no labels', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task that consistently gets no labels',
             labels: [],
             isCompleted: false,
@@ -373,15 +374,15 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const maxAttemptsTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'pending',
           attempts: 2, // This will be the 3rd attempt (max)
         });
 
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(maxAttemptsTaskRecord);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: maxAttemptsTaskRecord });
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-1', labels: [] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-1'), labels: [] }) }
         );
 
         const stats = await syncManager.sync();
@@ -389,18 +390,18 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(stats.processed).toBe(1);
         expect(stats.failed).toBe(1);
 
-        expect(mockDb.markTaskFailed).toHaveBeenCalledWith('task-1');
+        expect(mockDb.markTaskFailed).toHaveBeenCalledWith(asTaskId('task-1'));
         expect(mockDb.logError).toHaveBeenCalledWith(
           'CLASSIFICATION_EMPTY',
           'No labels could be assigned after max attempts',
-          'task-1'
+          asTaskId('task-1')
         );
       });
 
       it('should handle classification errors with retry logic', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task that causes error',
             labels: [],
             isCompleted: false,
@@ -408,43 +409,30 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const existingTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'pending',
           attempts: 1,
         });
 
-        const classificationError = createNetworkError();
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(existingTaskRecord);
-        mockClassifier.classifyTask.mockRejectedValue(classificationError);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: existingTaskRecord });
+        // Return error Result instead of rejecting
+        mockClassifier.classifyTask.mockResolvedValue({ success: false, error: 'Network request failed' });
 
         const stats = await syncManager.sync();
 
         expect(stats.processed).toBe(1);
         expect(stats.failed).toBe(1);
 
-        expect(mockDb.markTaskAttempted).toHaveBeenCalledWith('task-1');
-        expect(mockDb.logError).toHaveBeenCalledWith(
-          'CLASSIFICATION_ERROR',
-          'Network request failed',
-          'task-1',
-          expect.any(String)
-        );
-
-        expect(mockLogger.warn).toHaveBeenCalledWith(
-          'Task classification failed, will retry',
-          {
-            taskId: 'task-1',
-            attempts: 2, // attempts + 1
-            error: 'Network request failed',
-          }
-        );
+        expect(mockDb.markTaskAttempted).toHaveBeenCalledWith(asTaskId('task-1'));
+        // When classification returns error Result (not throws), no logError is called for retryable errors
+        // Only permanent failures log errors
       });
 
       it('should mark task as permanently failed after max attempts with errors', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task that consistently errors',
             labels: [],
             isCompleted: false,
@@ -452,35 +440,32 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const maxAttemptsTaskRecord = createMockTaskRecord({
-          taskId: 'task-1',
+          taskId: asTaskId('task-1'),
           status: 'pending',
           attempts: 2, // This will be the 3rd attempt (max)
         });
 
-        const classificationError = createNetworkError();
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(maxAttemptsTaskRecord);
-        mockClassifier.classifyTask.mockRejectedValue(classificationError);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: true, data: maxAttemptsTaskRecord });
+        // Return error Result instead of rejecting
+        mockClassifier.classifyTask.mockResolvedValue({ success: false, error: 'Network request failed' });
 
         const stats = await syncManager.sync();
 
         expect(stats.failed).toBe(1);
 
-        expect(mockDb.markTaskFailed).toHaveBeenCalledWith('task-1');
-        expect(mockLogger.error).toHaveBeenCalledWith(
-          'Task classification permanently failed',
-          classificationError,
-          {
-            taskId: 'task-1',
-            attempts: 3,
-          }
+        expect(mockDb.markTaskFailed).toHaveBeenCalledWith(asTaskId('task-1'));
+        expect(mockDb.logError).toHaveBeenCalledWith(
+          'CLASSIFICATION_FAILED',
+          'Network request failed',
+          asTaskId('task-1')
         );
       });
 
       it('should handle Todoist API update errors', async () => {
         const mockTasks: TodoistTask[] = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Task with API update error',
             labels: [],
             isCompleted: false,
@@ -488,10 +473,10 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const updateError = createNetworkError();
-        mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-        mockDb.getTask.mockReturnValue(null);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+        mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
         mockClassifier.classifyTask.mockResolvedValue(
-          createMockClassificationResult({ taskId: 'task-1', labels: ['work'] })
+          { success: true, data: createMockClassificationResult({ taskId: asTaskId('task-1'), labels: ['work'] }) }
         );
         mockApi.updateTaskLabels.mockRejectedValue(updateError);
 
@@ -503,7 +488,7 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(mockDb.logError).toHaveBeenCalledWith(
           'CLASSIFICATION_ERROR',
           'Network request failed',
-          'task-1',
+          asTaskId('task-1'),
           expect.any(String)
         );
 
@@ -512,7 +497,7 @@ describe('sync.ts - Sync Orchestration', () => {
       });
 
       it('should prevent concurrent sync operations', async () => {
-        mockApi.getInboxTasks.mockResolvedValue([]);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: [] });
 
         // Start first sync
         const sync1Promise = syncManager.sync();
@@ -533,7 +518,7 @@ describe('sync.ts - Sync Orchestration', () => {
       });
 
       it('should handle empty task list', async () => {
-        mockApi.getInboxTasks.mockResolvedValue([]);
+        mockApi.getInboxTasks.mockResolvedValue({ success: true, data: [] });
 
         const stats = await syncManager.sync();
 
@@ -549,19 +534,22 @@ describe('sync.ts - Sync Orchestration', () => {
       });
 
       it('should handle sync-level errors', async () => {
-        const apiError = createNetworkError();
-        mockApi.getInboxTasks.mockRejectedValue(apiError);
+        // When getInboxTasks returns a failure Result, sync should return early with zeros
+        mockApi.getInboxTasks.mockResolvedValue({ success: false, error: 'Network request failed' });
 
-        await expect(syncManager.sync()).rejects.toThrow('Network request failed');
+        const stats = await syncManager.sync();
 
-        expect(mockDb.logError).toHaveBeenCalledWith(
-          'SYNC_ERROR',
-          'Network request failed',
-          undefined,
-          expect.any(String)
+        expect(stats).toEqual({
+          processed: 0,
+          classified: 0,
+          failed: 0,
+          skipped: 0,
+        });
+
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          'Failed to get inbox tasks',
+          expect.any(Error)
         );
-
-        expect(mockLogger.error).toHaveBeenCalledWith('Sync cycle failed', apiError);
       });
     });
 
@@ -569,13 +557,13 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should retry pending tasks that havent reached max attempts', async () => {
         const pendingTasks: TaskRecord[] = [
           createMockTaskRecord({
-            taskId: 'task-1',
+            taskId: asTaskId('task-1'),
             content: 'Retry task 1',
             status: 'pending',
             attempts: 1,
           }),
           createMockTaskRecord({
-            taskId: 'task-2',
+            taskId: asTaskId('task-2'),
             content: 'Retry task 2',
             status: 'pending',
             attempts: 2,
@@ -584,30 +572,33 @@ describe('sync.ts - Sync Orchestration', () => {
 
         const mockTasks = [
           createMockTodoistTask({
-            id: 'task-1',
+            id: asTaskId('task-1'),
             content: 'Retry task 1',
             labels: [],
           }),
           createMockTodoistTask({
-            id: 'task-2',
+            id: asTaskId('task-2'),
             content: 'Retry task 2',
             labels: [],
           }),
         ];
 
         mockDb.getPendingRetryableTasks.mockReturnValue(pendingTasks);
+        mockDb.getTask
+          .mockReturnValueOnce({ success: true, data: pendingTasks[0] })
+          .mockReturnValueOnce({ success: true, data: pendingTasks[1] });
         mockApi.getTask
           .mockResolvedValueOnce(mockTasks[0])
           .mockResolvedValueOnce(mockTasks[1]);
         mockClassifier.classifyTask
-          .mockResolvedValueOnce(createMockClassificationResult({
-            taskId: 'task-1',
+          .mockResolvedValueOnce({ success: true, data: createMockClassificationResult({
+            taskId: asTaskId('task-1'),
             labels: ['productivity'],
-          }))
-          .mockResolvedValueOnce(createMockClassificationResult({
-            taskId: 'task-2',
+          })})
+          .mockResolvedValueOnce({ success: true, data: createMockClassificationResult({
+            taskId: asTaskId('task-2'),
             labels: ['work'],
-          }));
+          })});
 
         const retried = await syncManager.retryFailedTasks();
 
@@ -615,8 +606,8 @@ describe('sync.ts - Sync Orchestration', () => {
         expect(mockDb.getPendingRetryableTasks).toHaveBeenCalled();
         expect(mockApi.getTask).toHaveBeenCalledTimes(2);
         expect(mockClassifier.classifyTask).toHaveBeenCalledTimes(2);
-        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('task-1', ['productivity']);
-        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('task-2', ['work']);
+        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('task-1'), ['productivity']);
+        expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('task-2'), ['work']);
 
         expect(mockLogger.info).toHaveBeenCalledWith('Found 2 tasks to retry');
       });
@@ -624,7 +615,7 @@ describe('sync.ts - Sync Orchestration', () => {
       it('should skip deleted tasks', async () => {
         const pendingTasks: TaskRecord[] = [
           createMockTaskRecord({
-            taskId: 'deleted-task',
+            taskId: asTaskId('deleted-task'),
             content: 'This task was deleted',
             status: 'pending',
             attempts: 1,
@@ -637,13 +628,13 @@ describe('sync.ts - Sync Orchestration', () => {
         const retried = await syncManager.retryFailedTasks();
 
         expect(retried).toBe(0);
-        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith('deleted-task');
+        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith(asTaskId('deleted-task'));
       });
 
       it('should skip tasks that now have labels', async () => {
         const pendingTasks: TaskRecord[] = [
           createMockTaskRecord({
-            taskId: 'task-1',
+            taskId: asTaskId('task-1'),
             content: 'Task now has labels',
             status: 'pending',
             attempts: 1,
@@ -651,7 +642,7 @@ describe('sync.ts - Sync Orchestration', () => {
         ];
 
         const taskWithLabels = createMockTodoistTask({
-          id: 'task-1',
+          id: asTaskId('task-1'),
           content: 'Task now has labels',
           labels: ['manually-added'],
         });
@@ -662,7 +653,7 @@ describe('sync.ts - Sync Orchestration', () => {
         const retried = await syncManager.retryFailedTasks();
 
         expect(retried).toBe(0);
-        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith('task-1');
+        expect(mockDb.markTaskSkipped).toHaveBeenCalledWith(asTaskId('task-1'));
         expect(mockClassifier.classifyTask).not.toHaveBeenCalled();
       });
 
@@ -763,19 +754,19 @@ describe('sync.ts - Sync Orchestration', () => {
     it('should handle mixed task scenarios in single sync', async () => {
       const mockTasks: TodoistTask[] = [
         createMockTodoistTask({
-          id: 'new-task',
+          id: asTaskId('new-task'),
           content: 'Brand new task',
           labels: [],
           isCompleted: false,
         }),
         createMockTodoistTask({
-          id: 'labeled-task',
+          id: asTaskId('labeled-task'),
           content: 'Task with existing labels',
           labels: ['existing'],
           isCompleted: false,
         }),
         createMockTodoistTask({
-          id: 'completed-task',
+          id: asTaskId('completed-task'),
           content: 'Completed task',
           labels: [],
           isCompleted: true,
@@ -783,35 +774,37 @@ describe('sync.ts - Sync Orchestration', () => {
       ];
 
       const existingFailedRecord = createMockTaskRecord({
-        taskId: 'retry-task',
+        taskId: asTaskId('retry-task'),
         status: 'pending',
         attempts: 1,
       });
 
       // Add a retry task that exists in database but not in current sync
       mockTasks.push(createMockTodoistTask({
-        id: 'retry-task',
+        id: asTaskId('retry-task'),
         content: 'Task to retry',
         labels: [],
         isCompleted: false,
       }));
 
-      mockApi.getInboxTasks.mockResolvedValue(mockTasks);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
       mockDb.getTask
-        .mockReturnValueOnce(null) // new-task
-        .mockReturnValueOnce(null) // labeled-task
-        .mockReturnValueOnce(null) // completed-task
-        .mockReturnValueOnce(existingFailedRecord); // retry-task
+        .mockReturnValueOnce({ success: false, error: 'not_found' }) // new-task
+        .mockReturnValueOnce({ success: false, error: 'not_found' }) // labeled-task
+        .mockReturnValueOnce({ success: false, error: 'not_found' }) // completed-task
+        .mockReturnValueOnce({ success: true, data: existingFailedRecord }) // retry-task
+        .mockReturnValueOnce({ success: false, error: 'not_found' }) // new-task (in processTask)
+        .mockReturnValueOnce({ success: true, data: existingFailedRecord }); // retry-task (in processTask)
 
       mockClassifier.classifyTask
-        .mockResolvedValueOnce(createMockClassificationResult({
-          taskId: 'new-task',
+        .mockResolvedValueOnce({ success: true, data: createMockClassificationResult({
+          taskId: asTaskId('new-task'),
           labels: ['productivity'],
-        }))
-        .mockResolvedValueOnce(createMockClassificationResult({
-          taskId: 'retry-task',
+        })})
+        .mockResolvedValueOnce({ success: true, data: createMockClassificationResult({
+          taskId: asTaskId('retry-task'),
           labels: ['work'],
-        }));
+        })});
 
       const stats = await syncManager.sync();
 
@@ -821,45 +814,44 @@ describe('sync.ts - Sync Orchestration', () => {
       expect(stats.skipped).toBe(0);
 
       // Verify labeled-task was marked as skipped
-      expect(mockDb.markTaskSkipped).toHaveBeenCalledWith('labeled-task');
+      expect(mockDb.markTaskSkipped).toHaveBeenCalledWith(asTaskId('labeled-task'));
 
       // Verify new-task was classified
-      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('new-task', ['productivity']);
-      expect(mockDb.markTaskClassified).toHaveBeenCalledWith('new-task', ['productivity']);
+      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('new-task'), ['productivity']);
+      expect(mockDb.markTaskClassified).toHaveBeenCalledWith(asTaskId('new-task'), ['productivity']);
 
       // Verify retry-task was classified
-      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('retry-task', ['work']);
-      expect(mockDb.markTaskClassified).toHaveBeenCalledWith('retry-task', ['work']);
+      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('retry-task'), ['work']);
+      expect(mockDb.markTaskClassified).toHaveBeenCalledWith(asTaskId('retry-task'), ['work']);
     });
 
     it('should handle partial failures gracefully', async () => {
       const mockTasks: TodoistTask[] = [
         createMockTodoistTask({
-          id: 'success-task',
+          id: asTaskId('success-task'),
           content: 'This will succeed',
           labels: [],
           isCompleted: false,
         }),
         createMockTodoistTask({
-          id: 'fail-task',
+          id: asTaskId('fail-task'),
           content: 'This will fail',
           labels: [],
           isCompleted: false,
         }),
       ];
 
-      mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-      mockDb.getTask.mockReturnValue(null);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+      mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
 
       const successResult = createMockClassificationResult({
-        taskId: 'success-task',
+        taskId: asTaskId('success-task'),
         labels: ['productivity'],
       });
-      const failureError = createNetworkError();
 
       mockClassifier.classifyTask
-        .mockResolvedValueOnce(successResult)
-        .mockRejectedValueOnce(failureError);
+        .mockResolvedValueOnce({ success: true, data: successResult })
+        .mockResolvedValueOnce({ success: false, error: 'Network request failed' });
 
       const stats = await syncManager.sync();
 
@@ -868,38 +860,33 @@ describe('sync.ts - Sync Orchestration', () => {
       expect(stats.failed).toBe(1);
 
       // Success case should complete normally
-      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith('success-task', ['productivity']);
-      expect(mockDb.markTaskClassified).toHaveBeenCalledWith('success-task', ['productivity']);
+      expect(mockApi.updateTaskLabels).toHaveBeenCalledWith(asTaskId('success-task'), ['productivity']);
+      expect(mockDb.markTaskClassified).toHaveBeenCalledWith(asTaskId('success-task'), ['productivity']);
 
-      // Failure case should log error and increment attempts
-      expect(mockDb.logError).toHaveBeenCalledWith(
-        'CLASSIFICATION_ERROR',
-        'Network request failed',
-        'fail-task',
-        expect.any(String)
-      );
+      // Failure case should increment attempts (no logError for retryable failures)
+      expect(mockDb.markTaskAttempted).toHaveBeenCalledWith(asTaskId('fail-task'));
     });
 
     it('should handle large number of tasks efficiently', async () => {
       const manyTasks = Array.from({ length: 100 }, (_, i) =>
         createMockTodoistTask({
-          id: `task-${i}`,
+          id: asTaskId(`task-${i}`),
           content: `Task ${i}`,
           labels: [],
           isCompleted: false,
         })
       );
 
-      mockApi.getInboxTasks.mockResolvedValue(manyTasks);
-      mockDb.getTask.mockReturnValue(null);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: manyTasks });
+      mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
 
       // Mock all classifications to succeed
       for (let i = 0; i < 100; i++) {
         mockClassifier.classifyTask.mockResolvedValueOnce(
-          createMockClassificationResult({
-            taskId: `task-${i}`,
+          { success: true, data: createMockClassificationResult({
+            taskId: asTaskId(`task-${i}`),
             labels: ['bulk-test'],
-          })
+          })}
         );
       }
 
@@ -920,20 +907,20 @@ describe('sync.ts - Sync Orchestration', () => {
 
     it('should handle malformed task data gracefully', async () => {
       const malformedTask = {
-        id: 'malformed-task',
+        id: asTaskId('malformed-task'),
         content: null, // Invalid content
         description: undefined,
         labels: null,
         isCompleted: false,
       } as unknown as TodoistTask;
 
-      mockApi.getInboxTasks.mockResolvedValue([malformedTask]);
-      mockDb.getTask.mockReturnValue(null);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: [malformedTask] });
+      mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
       mockClassifier.classifyTask.mockResolvedValue(
-        createMockClassificationResult({
-          taskId: 'malformed-task',
+        { success: true, data: createMockClassificationResult({
+          taskId: asTaskId('malformed-task'),
           labels: ['recovered'],
-        })
+        })}
       );
 
       // Should not throw error
@@ -946,15 +933,15 @@ describe('sync.ts - Sync Orchestration', () => {
     it('should handle database transaction failures', async () => {
       const mockTasks: TodoistTask[] = [
         createMockTodoistTask({
-          id: 'db-fail-task',
+          id: asTaskId('db-fail-task'),
           content: 'Database will fail',
           labels: [],
           isCompleted: false,
         }),
       ];
 
-      mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-      mockDb.getTask.mockReturnValue(null);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+      mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
       mockDb.upsertTask.mockImplementation(() => {
         throw new Error('Database constraint violation');
       });
@@ -970,7 +957,7 @@ describe('sync.ts - Sync Orchestration', () => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Error processing task',
         expect.any(Error),
-        { taskId: 'db-fail-task' }
+        { taskId: asTaskId('db-fail-task') }
       );
     });
 
@@ -978,20 +965,20 @@ describe('sync.ts - Sync Orchestration', () => {
       const longContent = 'A'.repeat(100000);
       const mockTasks: TodoistTask[] = [
         createMockTodoistTask({
-          id: 'long-task',
+          id: asTaskId('long-task'),
           content: longContent,
           labels: [],
           isCompleted: false,
         }),
       ];
 
-      mockApi.getInboxTasks.mockResolvedValue(mockTasks);
-      mockDb.getTask.mockReturnValue(null);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: mockTasks });
+      mockDb.getTask.mockReturnValue({ success: false, error: 'not_found' });
       mockClassifier.classifyTask.mockResolvedValue(
-        createMockClassificationResult({
-          taskId: 'long-task',
+        { success: true, data: createMockClassificationResult({
+          taskId: asTaskId('long-task'),
           labels: ['long-content'],
-        })
+        })}
       );
 
       const stats = await syncManager.sync();
@@ -1001,14 +988,15 @@ describe('sync.ts - Sync Orchestration', () => {
     });
 
     it('should maintain sync state consistency across errors', async () => {
-      // Simulate sync failure
-      const syncError = createNetworkError();
-      mockApi.getInboxTasks.mockRejectedValue(syncError);
+      // Simulate sync failure via Result error
+      mockApi.getInboxTasks.mockResolvedValue({ success: false, error: 'Network request failed' });
 
-      await expect(syncManager.sync()).rejects.toThrow('Network request failed');
+      // With Result types, sync returns early with zeros instead of throwing
+      const failStats = await syncManager.sync();
+      expect(failStats.processed).toBe(0);
 
       // Should still be able to sync again after error
-      mockApi.getInboxTasks.mockResolvedValue([]);
+      mockApi.getInboxTasks.mockResolvedValue({ success: true, data: [] });
 
       const stats = await syncManager.sync();
       expect(stats.processed).toBe(0);

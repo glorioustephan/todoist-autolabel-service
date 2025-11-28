@@ -4,40 +4,63 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import type {
   Config,
   LabelsConfig,
   ClassificationResult,
   ClassificationRequest,
+  Result,
 } from './types.js';
+import { ok, err } from './types.js';
 import { getLogger } from './logger.js';
 
 // Structured Outputs beta header
 const STRUCTURED_OUTPUTS_BETA = 'structured-outputs-2025-11-13';
 
 /**
- * Load labels from the labels.json file
+ * Load labels from the labels.json file asynchronously
  */
-export function loadLabels(labelsPath: string): string[] {
+export async function loadLabels(labelsPath: string): Promise<Result<readonly string[], string>> {
   const logger = getLogger();
 
   try {
-    const content = fs.readFileSync(labelsPath, 'utf-8');
-    const config: LabelsConfig = JSON.parse(content);
+    const content = await fs.readFile(labelsPath, 'utf-8');
+    const config: unknown = JSON.parse(content);
 
-    if (!config.labels || !Array.isArray(config.labels)) {
-      throw new Error('Invalid labels.json: missing "labels" array');
+    // Type guard for LabelsConfig
+    if (!isLabelsConfig(config)) {
+      return err('Invalid labels.json: missing "labels" array or malformed structure');
     }
 
     const labelNames = config.labels.map((l) => l.name);
     logger.debug(`Loaded ${labelNames.length} labels from ${labelsPath}`);
 
-    return labelNames;
+    return ok(labelNames);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     logger.error('Failed to load labels', error, { labelsPath });
-    throw error;
+    return err(`Failed to load labels: ${message}`);
   }
+}
+
+/**
+ * Type guard for LabelsConfig
+ */
+function isLabelsConfig(value: unknown): value is LabelsConfig {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'labels' in value &&
+    Array.isArray((value as { labels: unknown }).labels) &&
+    (value as { labels: unknown[] }).labels.every(
+      (label) =>
+        typeof label === 'object' &&
+        label !== null &&
+        'name' in label &&
+        typeof (label as { name: unknown }).name === 'string'
+    )
+  );
 }
 
 /**
@@ -110,37 +133,72 @@ interface ClassificationResponse {
 export class TaskClassifier {
   private client: Anthropic;
   private config: Config;
-  private availableLabels: string[];
+  private availableLabels: readonly string[] = [];
+  private isInitialized = false;
 
   constructor(config: Config) {
     this.config = config;
     this.client = new Anthropic({
       apiKey: config.anthropicApiKey,
     });
-    this.availableLabels = loadLabels(config.labelsPath);
+  }
+
+  /**
+   * Initialize the classifier by loading labels
+   */
+  async initialize(): Promise<Result<void, string>> {
+    if (this.isInitialized) {
+      return ok(undefined);
+    }
+
+    const labelsResult = await loadLabels(this.config.labelsPath);
+    if (!labelsResult.success) {
+      return err(labelsResult.error);
+    }
+
+    this.availableLabels = labelsResult.data;
+    this.isInitialized = true;
+    return ok(undefined);
+  }
+
+  /**
+   * Ensure the classifier is initialized
+   */
+  private async ensureInitialized(): Promise<Result<void, string>> {
+    if (!this.isInitialized) {
+      return await this.initialize();
+    }
+    return ok(undefined);
   }
 
   /**
    * Get available labels
    */
-  getAvailableLabels(): string[] {
-    return [...this.availableLabels];
+  getAvailableLabels(): readonly string[] {
+    return this.availableLabels;
   }
 
   /**
    * Reload labels from file
    */
-  reloadLabels(): void {
-    this.availableLabels = loadLabels(this.config.labelsPath);
+  async reloadLabels(): Promise<Result<void, string>> {
+    this.isInitialized = false;
+    return await this.initialize();
   }
 
   /**
    * Classify a task using Structured Outputs
    */
-  async classifyTask(request: ClassificationRequest): Promise<ClassificationResult> {
+  async classifyTask(request: ClassificationRequest): Promise<Result<ClassificationResult, string>> {
     const logger = getLogger();
-    const labelsToUse = request.availableLabels.length > 0 
-      ? request.availableLabels 
+
+    const initResult = await this.ensureInitialized();
+    if (!initResult.success) {
+      return err(`Classifier not initialized: ${initResult.error}`);
+    }
+
+    const labelsToUse = request.availableLabels.length > 0
+      ? request.availableLabels
       : this.availableLabels;
 
     try {
@@ -155,32 +213,32 @@ export class TaskClassifier {
         messages: [
           {
             role: 'user',
-            content: buildUserPrompt(request.content, request.description, labelsToUse),
+            content: buildUserPrompt(request.content, request.description, [...labelsToUse]),
           },
         ],
         output_format: {
           type: 'json_schema',
-          schema: buildOutputSchema(labelsToUse),
+          schema: buildOutputSchema([...labelsToUse]),
         },
       });
 
       // Check for refusal
       if (message.stop_reason === 'refusal') {
         logger.warn('Classification refused by model', { taskId: request.taskId });
-        return {
+        return ok({
           taskId: request.taskId,
           labels: [],
           rawResponse: 'Model refused to classify this task',
-        };
+        });
       }
 
       // Extract and parse the guaranteed-valid JSON response
-      const responseText = message.content[0].type === 'text' 
-        ? message.content[0].text 
+      const responseText = message.content[0]?.type === 'text'
+        ? message.content[0].text
         : '{"labels":[]}';
 
       const parsed: ClassificationResponse = JSON.parse(responseText);
-      
+
       // Limit to configured max labels
       const labels = parsed.labels.slice(0, this.config.maxLabelsPerTask);
 
@@ -189,38 +247,38 @@ export class TaskClassifier {
         labels,
       });
 
-      return {
+      return ok({
         taskId: request.taskId,
         labels,
         rawResponse: responseText,
-      };
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error('Classification failed', error, { taskId: request.taskId });
-      throw error;
+      return err(`Classification failed: ${message}`);
     }
   }
 
   /**
-   * Classify multiple tasks
+   * Classify multiple tasks using functional composition
    */
-  async classifyTasks(requests: ClassificationRequest[]): Promise<ClassificationResult[]> {
-    const results: ClassificationResult[] = [];
+  async classifyTasks(requests: readonly ClassificationRequest[]): Promise<readonly ClassificationResult[]> {
+    const classifyWithFallback = async (request: ClassificationRequest): Promise<ClassificationResult> => {
+      const result = await this.classifyTask(request);
 
-    for (const request of requests) {
-      try {
-        const result = await this.classifyTask(request);
-        results.push(result);
-      } catch (error) {
-        // Return partial result with empty labels on error
-        results.push({
-          taskId: request.taskId,
-          labels: [],
-          rawResponse: error instanceof Error ? error.message : String(error),
-        });
+      if (result.success) {
+        return result.data;
       }
-    }
 
-    return results;
+      // Return fallback result on error
+      return {
+        taskId: request.taskId,
+        labels: [],
+        rawResponse: result.error,
+      };
+    };
+
+    return Promise.all(requests.map(classifyWithFallback));
   }
 }
 
@@ -232,11 +290,17 @@ let classifierInstance: TaskClassifier | null = null;
 /**
  * Initialize the classifier
  */
-export function initClassifier(config: Config): TaskClassifier {
+export async function initClassifier(config: Config): Promise<Result<TaskClassifier, string>> {
   if (!classifierInstance) {
     classifierInstance = new TaskClassifier(config);
   }
-  return classifierInstance;
+
+  const initResult = await classifierInstance.initialize();
+  if (!initResult.success) {
+    return err(initResult.error);
+  }
+
+  return ok(classifierInstance);
 }
 
 /**
