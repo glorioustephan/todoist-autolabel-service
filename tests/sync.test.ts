@@ -13,6 +13,10 @@ import {
   createMockTodoistApi,
   createMockClassifier,
   createNetworkError,
+  type MockLogger,
+  type MockDatabase,
+  type MockTodoistApi,
+  type MockClassifier,
 } from './test-utils.js';
 import type { Config, TodoistTask, TaskRecord } from '../src/types.js';
 
@@ -48,10 +52,10 @@ vi.mock('../src/classifier.js', () => {
 describe('sync.ts - Sync Orchestration', () => {
   let config: Config;
   let syncManager: SyncManager;
-  let mockDb: ReturnType<typeof createMockDatabase>;
-  let mockApi: ReturnType<typeof createMockTodoistApi>;
-  let mockClassifier: ReturnType<typeof createMockClassifier>;
-  let mockLogger: ReturnType<typeof vi.fn>;
+  let mockDb: MockDatabase;
+  let mockApi: MockTodoistApi;
+  let mockClassifier: MockClassifier;
+  let mockLogger: MockLogger;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -70,11 +74,11 @@ describe('sync.ts - Sync Orchestration', () => {
     const { getClassifier } = await import('../src/classifier.js');
     const { getLogger } = await import('../src/logger.js');
 
-    mockLogger = vi.mocked(getLogger)();
+    mockLogger = vi.mocked(getLogger)() as unknown as MockLogger;
 
-    vi.mocked(getDatabase).mockReturnValue(mockDb);
-    vi.mocked(getTodoistApi).mockReturnValue(mockApi);
-    vi.mocked(getClassifier).mockReturnValue(mockClassifier);
+    vi.mocked(getDatabase).mockReturnValue(mockDb as any);
+    vi.mocked(getTodoistApi).mockReturnValue(mockApi as any);
+    vi.mocked(getClassifier).mockReturnValue(mockClassifier as any);
 
     // Reset all mock implementations
     Object.keys(mockDb).forEach(key => {

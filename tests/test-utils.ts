@@ -159,9 +159,69 @@ export function cleanupTempFiles(paths: string[]): void {
 // ============================================
 
 /**
+ * Mock Logger type for testing
+ */
+export interface MockLogger {
+  debug: ReturnType<typeof vi.fn>;
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+  success: ReturnType<typeof vi.fn>;
+  setLevel: ReturnType<typeof vi.fn>;
+  getLevel: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Mock Database type for testing
+ */
+export interface MockDatabase {
+  getSyncState: ReturnType<typeof vi.fn>;
+  saveSyncToken: ReturnType<typeof vi.fn>;
+  saveLastSyncAt: ReturnType<typeof vi.fn>;
+  saveInboxProjectId: ReturnType<typeof vi.fn>;
+  getTask: ReturnType<typeof vi.fn>;
+  getTasksByStatus: ReturnType<typeof vi.fn>;
+  getPendingRetryableTasks: ReturnType<typeof vi.fn>;
+  upsertTask: ReturnType<typeof vi.fn>;
+  markTaskClassified: ReturnType<typeof vi.fn>;
+  markTaskAttempted: ReturnType<typeof vi.fn>;
+  markTaskFailed: ReturnType<typeof vi.fn>;
+  markTaskSkipped: ReturnType<typeof vi.fn>;
+  taskNeedsClassification: ReturnType<typeof vi.fn>;
+  logError: ReturnType<typeof vi.fn>;
+  getRecentErrors: ReturnType<typeof vi.fn>;
+  getTaskErrors: ReturnType<typeof vi.fn>;
+  getStats: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Mock Todoist API type for testing
+ */
+export interface MockTodoistApi {
+  initialize: ReturnType<typeof vi.fn>;
+  getInboxProjectId: ReturnType<typeof vi.fn>;
+  getInboxTasks: ReturnType<typeof vi.fn>;
+  getLabels: ReturnType<typeof vi.fn>;
+  updateTaskLabels: ReturnType<typeof vi.fn>;
+  getTask: ReturnType<typeof vi.fn>;
+  validateLabels: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Mock Classifier type for testing
+ */
+export interface MockClassifier {
+  getAvailableLabels: ReturnType<typeof vi.fn>;
+  reloadLabels: ReturnType<typeof vi.fn>;
+  classifyTask: ReturnType<typeof vi.fn>;
+  classifyTasks: ReturnType<typeof vi.fn>;
+}
+
+/**
  * Create a mock database instance
  */
-export function createMockDatabase() {
+export function createMockDatabase(): MockDatabase {
   return {
     getSyncState: vi.fn().mockReturnValue({
       syncToken: null,
@@ -197,7 +257,7 @@ export function createMockDatabase() {
 /**
  * Create a mock Todoist API instance
  */
-export function createMockTodoistApi() {
+export function createMockTodoistApi(): MockTodoistApi {
   return {
     initialize: vi.fn(),
     getInboxProjectId: vi.fn().mockReturnValue('inbox-project-id'),
@@ -212,7 +272,7 @@ export function createMockTodoistApi() {
 /**
  * Create a mock classifier instance
  */
-export function createMockClassifier() {
+export function createMockClassifier(): MockClassifier {
   return {
     getAvailableLabels: vi.fn().mockReturnValue(['productivity', 'work', 'personal']),
     reloadLabels: vi.fn(),
@@ -224,7 +284,7 @@ export function createMockClassifier() {
 /**
  * Create a mock logger instance
  */
-export function createMockLogger() {
+export function createMockLogger(): MockLogger {
   return {
     debug: vi.fn(),
     info: vi.fn(),

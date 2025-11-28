@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TodoistApiManager, initTodoistApi, getTodoistApi, resetTodoistApi } from '../src/todoist-api.js';
-import { createMockConfig, createMockTodoistTask, createMockTodoistLabel, createNetworkError } from './test-utils.js';
+import { createMockConfig, createMockTodoistTask, createNetworkError, type MockLogger } from './test-utils.js';
 import type { Config } from '../src/types.js';
 
 // Mock the Todoist API SDK
@@ -42,7 +42,7 @@ vi.mock('../src/todoist-api.js', async (importOriginal) => {
 describe('todoist-api.ts - Todoist API Client', () => {
   let config: Config;
   let apiManager: TodoistApiManager;
-  let mockLogger: ReturnType<typeof vi.fn>;
+  let mockLogger: MockLogger;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -50,7 +50,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
 
     // Get the mocked logger instance
     const { getLogger } = await import('../src/logger.js');
-    mockLogger = vi.mocked(getLogger)();
+    mockLogger = vi.mocked(getLogger)() as unknown as MockLogger;
 
     config = createMockConfig({
       todoistApiToken: 'test-todoist-token',
@@ -349,7 +349,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
 
       it('should update task labels with API delay', async () => {
         const labels = ['productivity', 'urgent'];
-        mockTodoistApi.updateTask.mockResolvedValue();
+        mockTodoistApi.updateTask.mockResolvedValue(undefined);
 
         const updatePromise = apiManager.updateTaskLabels('task-123', labels);
 
@@ -366,7 +366,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should handle empty labels array', async () => {
-        mockTodoistApi.updateTask.mockResolvedValue();
+        mockTodoistApi.updateTask.mockResolvedValue(undefined);
 
         const updatePromise = apiManager.updateTaskLabels('task-123', []);
         vi.advanceTimersByTime(200);
@@ -392,7 +392,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should respect API delay timing', async () => {
-        mockTodoistApi.updateTask.mockResolvedValue();
+        mockTodoistApi.updateTask.mockResolvedValue(undefined);
 
         const startTime = Date.now();
         const updatePromise = apiManager.updateTaskLabels('task-123', ['test']);
@@ -745,7 +745,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
 
     it('should handle very large label arrays', async () => {
       const manyLabels = Array.from({ length: 1000 }, (_, i) => `label-${i}`);
-      mockTodoistApi.updateTask.mockResolvedValue();
+      mockTodoistApi.updateTask.mockResolvedValue(undefined);
 
       const updatePromise = apiManager.updateTaskLabels('task-123', manyLabels);
       vi.advanceTimersByTime(200);

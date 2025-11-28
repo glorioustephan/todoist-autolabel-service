@@ -13,10 +13,10 @@ import {
 } from '../src/classifier.js';
 import {
   createMockConfig,
-  createTempLabelsFile,
   cleanupTempFiles,
   createMockLabels,
   createNetworkError,
+  type MockLogger,
 } from './test-utils.js';
 import type { Config, ClassificationRequest } from '../src/types.js';
 
@@ -56,7 +56,7 @@ vi.mock('../src/logger.js', () => ({
 describe('classifier.ts - Claude AI Classification', () => {
   let config: Config;
   let tempFiles: string[] = [];
-  let mockLogger: ReturnType<typeof vi.fn>;
+  let mockLogger: MockLogger;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -65,7 +65,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
     // Get the mocked logger instance
     const { getLogger } = await import('../src/logger.js');
-    mockLogger = vi.mocked(getLogger)();
+    mockLogger = vi.mocked(getLogger)() as unknown as MockLogger;
 
     config = createMockConfig({
       anthropicApiKey: 'test-anthropic-key',

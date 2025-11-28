@@ -2,15 +2,14 @@
  * Unit tests for logger.ts - Logging functionality
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi, MockedFunction } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Logger, createLogger, getLogger } from '../src/logger.js';
-import type { LogLevel } from '../src/types.js';
 
 describe('logger.ts - Logging System', () => {
   let consoleSpy: {
-    log: MockedFunction<typeof console.log>;
-    warn: MockedFunction<typeof console.warn>;
-    error: MockedFunction<typeof console.error>;
+    log: ReturnType<typeof vi.spyOn>;
+    warn: ReturnType<typeof vi.spyOn>;
+    error: ReturnType<typeof vi.spyOn>;
   };
 
   beforeEach(() => {
@@ -398,8 +397,8 @@ describe('logger.ts - Logging System', () => {
       ['info', ['info', 'warn', 'error', 'success']],
       ['warn', ['warn', 'error']],
       ['error', ['error']],
-    ] as const)('should log correct methods for %s level', (level, expectedMethods) => {
-      const logger = new Logger(level);
+    ])('should log correct methods for %s level', (level, expectedMethods) => {
+      const logger = new Logger(level as 'debug' | 'info' | 'warn' | 'error');
 
       // Try all log methods
       logger.debug('Debug test');
@@ -409,9 +408,10 @@ describe('logger.ts - Logging System', () => {
       logger.success('Success test');
 
       // Count expected calls
-      const expectedLogCalls = expectedMethods.filter(m => ['debug', 'info', 'success'].includes(m)).length;
-      const expectedWarnCalls = expectedMethods.includes('warn') ? 1 : 0;
-      const expectedErrorCalls = expectedMethods.includes('error') ? 1 : 0;
+      const methods = expectedMethods as readonly string[];
+      const expectedLogCalls = methods.filter(m => ['debug', 'info', 'success'].includes(m)).length;
+      const expectedWarnCalls = methods.includes('warn') ? 1 : 0;
+      const expectedErrorCalls = methods.includes('error') ? 1 : 0;
 
       expect(consoleSpy.log).toHaveBeenCalledTimes(expectedLogCalls);
       expect(consoleSpy.warn).toHaveBeenCalledTimes(expectedWarnCalls);
