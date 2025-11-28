@@ -2,7 +2,7 @@
   "labels": [
     { "name": "home-and-property", "color": "teal" },
     { "name": "vehicles", "color": "sky_blue" },
-    { "name": "financial", "color": "blue" },
+    { "name": "financial", "color": "green" },
     { "name": "taxes", "color": "light_blue" },
     { "name": "planning-and-budgeting", "color": "olive_green" },
     { "name": "invoicing-billing-and-records", "color": "teal" },
