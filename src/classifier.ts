@@ -1,5 +1,6 @@
 /**
  * Claude AI classifier for Todoist Autolabel Service
+ * Uses Structured Outputs for guaranteed valid JSON responses
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -11,6 +12,9 @@ import type {
   ClassificationRequest,
 } from './types.js';
 import { getLogger } from './logger.js';
+
+// Structured Outputs beta header
+const STRUCTURED_OUTPUTS_BETA = 'structured-outputs-2025-11-13';
 
 /**
  * Load labels from the labels.json file
@@ -37,84 +41,71 @@ export function loadLabels(labelsPath: string): string[] {
 }
 
 /**
- * Build the classification prompt
+ * Build the classification system prompt
  */
-function buildClassificationPrompt(
+function buildSystemPrompt(): string {
+  return `You are a task classification assistant. Your job is to analyze tasks and assign the most appropriate labels from a predefined taxonomy.
+
+Guidelines:
+- Select 1-5 labels that best categorize the task
+- Prefer more specific labels over general ones when applicable
+- Consider both the task title and description when classifying
+- If unsure, choose broader category labels`;
+}
+
+/**
+ * Build the classification user prompt
+ */
+function buildUserPrompt(
   taskContent: string,
   taskDescription: string,
   availableLabels: string[]
 ): string {
-  const labelsFormatted = availableLabels.map((l) => `  - ${l}`).join('\n');
+  const labelsFormatted = availableLabels.join(', ');
+  
+  let prompt = `Classify this task and assign appropriate labels.
 
-  return `You are a task classification assistant. Your job is to analyze a task and assign the most appropriate labels from a predefined taxonomy.
+Task: ${taskContent}`;
 
-## Available Labels
-${labelsFormatted}
+  if (taskDescription) {
+    prompt += `\nDescription: ${taskDescription}`;
+  }
 
-## Task to Classify
-**Title:** ${taskContent}
-${taskDescription ? `**Description:** ${taskDescription}` : ''}
+  prompt += `\n\nAvailable labels: ${labelsFormatted}`;
 
-## Instructions
-1. Analyze the task content and description carefully
-2. Select 1-5 labels that best categorize this task
-3. Only use labels from the available labels list above
-4. Prefer more specific labels over general ones when applicable
-5. Return ONLY a JSON array of label names, nothing else
-
-## Response Format
-Return a JSON array of label names. Example:
-["label-one", "label-two"]
-
-Your response (JSON array only):`;
+  return prompt;
 }
 
 /**
- * Parse Claude's response to extract labels
+ * Build the JSON schema for structured output
  */
-function parseClassificationResponse(
-  response: string,
-  availableLabels: string[],
-  maxLabels: number
-): string[] {
-  const logger = getLogger();
-  const availableSet = new Set(availableLabels);
-
-  // Try to extract JSON array from response
-  let labels: string[] = [];
-
-  // Look for JSON array pattern
-  const jsonMatch = response.match(/\[[\s\S]*?\]/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed)) {
-        labels = parsed.filter((item): item is string => typeof item === 'string');
-      }
-    } catch {
-      logger.warn('Failed to parse JSON from response', { response });
-    }
-  }
-
-  // If no JSON found, try to extract label-like strings
-  if (labels.length === 0) {
-    // Look for strings that match available labels
-    for (const label of availableLabels) {
-      if (response.toLowerCase().includes(label.toLowerCase())) {
-        labels.push(label);
-      }
-    }
-  }
-
-  // Filter to only valid labels
-  const validLabels = labels.filter((label) => availableSet.has(label));
-
-  // Limit to max labels
-  return validLabels.slice(0, maxLabels);
+function buildOutputSchema(availableLabels: string[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      labels: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: availableLabels,
+        },
+        description: 'Array of label names that best categorize this task',
+      },
+    },
+    required: ['labels'],
+    additionalProperties: false,
+  };
 }
 
 /**
- * Task classifier using Claude AI
+ * Response type from structured output
+ */
+interface ClassificationResponse {
+  labels: string[];
+}
+
+/**
+ * Task classifier using Claude AI with Structured Outputs
  */
 export class TaskClassifier {
   private client: Anthropic;
@@ -144,46 +135,58 @@ export class TaskClassifier {
   }
 
   /**
-   * Classify a task
+   * Classify a task using Structured Outputs
    */
   async classifyTask(request: ClassificationRequest): Promise<ClassificationResult> {
     const logger = getLogger();
-
-    const prompt = buildClassificationPrompt(
-      request.content,
-      request.description,
-      request.availableLabels.length > 0 ? request.availableLabels : this.availableLabels
-    );
+    const labelsToUse = request.availableLabels.length > 0 
+      ? request.availableLabels 
+      : this.availableLabels;
 
     try {
       logger.debug('Classifying task', { taskId: request.taskId, content: request.content });
 
-      const message = await this.client.messages.create({
+      // Use beta API with structured outputs for guaranteed valid JSON
+      const message = await this.client.beta.messages.create({
         model: this.config.anthropicModel,
         max_tokens: 256,
+        betas: [STRUCTURED_OUTPUTS_BETA],
+        system: buildSystemPrompt(),
         messages: [
           {
             role: 'user',
-            content: prompt,
+            content: buildUserPrompt(request.content, request.description, labelsToUse),
           },
         ],
+        output_format: {
+          type: 'json_schema',
+          schema: buildOutputSchema(labelsToUse),
+        },
       });
 
-      // Extract text from response
-      const responseText =
-        message.content[0].type === 'text' ? message.content[0].text : '';
+      // Check for refusal
+      if (message.stop_reason === 'refusal') {
+        logger.warn('Classification refused by model', { taskId: request.taskId });
+        return {
+          taskId: request.taskId,
+          labels: [],
+          rawResponse: 'Model refused to classify this task',
+        };
+      }
 
-      // Parse labels from response
-      const labels = parseClassificationResponse(
-        responseText,
-        request.availableLabels.length > 0 ? request.availableLabels : this.availableLabels,
-        this.config.maxLabelsPerTask
-      );
+      // Extract and parse the guaranteed-valid JSON response
+      const responseText = message.content[0].type === 'text' 
+        ? message.content[0].text 
+        : '{"labels":[]}';
+
+      const parsed: ClassificationResponse = JSON.parse(responseText);
+      
+      // Limit to configured max labels
+      const labels = parsed.labels.slice(0, this.config.maxLabelsPerTask);
 
       logger.debug('Classification result', {
         taskId: request.taskId,
         labels,
-        rawResponse: responseText,
       });
 
       return {
@@ -252,4 +255,3 @@ export function getClassifier(): TaskClassifier {
 export function resetClassifier(): void {
   classifierInstance = null;
 }
-

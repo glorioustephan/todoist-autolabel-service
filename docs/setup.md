@@ -1,6 +1,6 @@
 # Setup Guide
 
-This guide walks you through setting up the Todoist Autolabel Service on your Mac Mini.
+This guide walks you through setting up the Todoist Autolabel Service.
 
 ## Prerequisites
 
@@ -34,8 +34,8 @@ Create a `.env` file in the project root:
 TODOIST_API_TOKEN=your_todoist_api_token_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Claude Configuration
-ANTHROPIC_MODEL=claude-3-haiku-20240307
+# Claude Configuration (Structured Outputs requires Sonnet 4.5 or Opus 4)
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 MAX_LABELS_PER_TASK=5
 
 # Service Configuration (defaults shown)
@@ -72,6 +72,8 @@ The service uses labels defined in `./labels.json`. This file should contain you
 }
 ```
 
+The Structured Outputs feature ensures Claude can only return labels that exist in your taxonomy.
+
 ## Build the Service
 
 Compile TypeScript to JavaScript:
@@ -105,7 +107,6 @@ todoist/
 ├── docs/              # Documentation
 ├── logs/              # PM2 logs (created when using PM2)
 ├── src/               # TypeScript source
-├── todoist/           # Original scripts
 ├── labels.json        # Label taxonomy
 ├── .env               # Environment variables
 ├── ecosystem.config.cjs  # PM2 configuration
@@ -118,7 +119,7 @@ todoist/
 |----------|----------|---------|-------------|
 | `TODOIST_API_TOKEN` | Yes | - | Your Todoist API token |
 | `ANTHROPIC_API_KEY` | Yes | - | Claude API key for classification |
-| `ANTHROPIC_MODEL` | No | `claude-3-haiku-20240307` | Claude model to use |
+| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-5-20250929` | Claude model to use |
 | `MAX_LABELS_PER_TASK` | No | `5` | Maximum labels to assign per task |
 | `POLL_INTERVAL_MS` | No | `15000` | Polling interval in milliseconds |
 | `MAX_ERROR_LOGS` | No | `1000` | Max error log entries before purge |
@@ -129,11 +130,10 @@ todoist/
 
 | Model | Speed | Cost | Best For |
 |-------|-------|------|----------|
-| `claude-3-haiku-20240307` | Fastest | ~$0.25/1M tokens | Most use cases |
-| `claude-3-5-sonnet-20241022` | Medium | ~$3/1M tokens | Better accuracy |
-| `claude-3-opus-20240229` | Slowest | ~$15/1M tokens | Complex taxonomies |
+| `claude-sonnet-4-5-20250929` | Fast | ~$3/1M tokens | Recommended default |
+| `claude-opus-4-20250514` | Slower | ~$15/1M tokens | Complex taxonomies |
 
-For most users, **Haiku** provides excellent results at minimal cost.
+> **Note**: This service uses Claude's Structured Outputs feature, which requires Claude Sonnet 4.5 or Claude Opus 4.
 
 ## Classification Behavior
 
@@ -141,9 +141,16 @@ For most users, **Haiku** provides excellent results at minimal cost.
 1. Service polls Todoist every 15 seconds using incremental sync
 2. New/changed tasks in the Inbox are identified
 3. Tasks without labels are sent to Claude for classification
-4. Claude analyzes the task and suggests labels from your taxonomy
+4. Claude analyzes the task and returns labels using Structured Outputs
 5. Labels are applied to the task in Todoist
 6. Classification state is recorded in SQLite
+
+### Structured Outputs
+
+The classifier uses Claude's [Structured Outputs](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) feature to guarantee:
+- Valid JSON responses (no parsing errors)
+- Only labels from your taxonomy can be returned
+- No retry logic needed for malformed responses
 
 ### Retry Logic
 - Failed classifications are retried on subsequent poll cycles
@@ -166,7 +173,8 @@ The Anthropic API key is required. Add it to your `.env` file.
 ### Tasks not being classified
 1. Ensure tasks are in your Inbox (other projects are ignored)
 2. Check Claude API key is valid
-3. View logs: `npm run pm2:logs`
+3. Ensure you're using a supported model (Sonnet 4.5 or Opus 4)
+4. View logs: `npm run pm2:logs`
 
 ### Database locked errors
 Only one instance of the service should run. Stop any existing instances:

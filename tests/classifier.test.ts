@@ -1,5 +1,5 @@
 /**
- * Unit tests for classifier.ts - Claude AI task classification
+ * Unit tests for classifier.ts - Claude AI task classification with Structured Outputs
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -20,10 +20,13 @@ import {
 } from './test-utils.js';
 import type { Config, ClassificationRequest } from '../src/types.js';
 
-// Mock Anthropic SDK
+// Mock Anthropic SDK with beta.messages.create for Structured Outputs
+const mockBetaMessagesCreate = vi.fn();
 const mockAnthropicClient = {
-  messages: {
-    create: vi.fn(),
+  beta: {
+    messages: {
+      create: mockBetaMessagesCreate,
+    },
   },
 };
 
@@ -66,7 +69,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
     config = createMockConfig({
       anthropicApiKey: 'test-anthropic-key',
-      anthropicModel: 'claude-haiku-4-5-20251001',
+      anthropicModel: 'claude-sonnet-4-5-20250929',
       maxLabelsPerTask: 3,
     });
   });
@@ -233,32 +236,50 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       it('should successfully classify task and return labels', async () => {
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'text',
-              text: '["productivity", "work"]',
+              text: '{"labels": ["productivity", "work"]}',
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        expect(mockAnthropicClient.messages.create).toHaveBeenCalledWith({
-          model: 'claude-haiku-4-5-20251001',
+        expect(mockBetaMessagesCreate).toHaveBeenCalledWith({
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 256,
+          betas: ['structured-outputs-2025-11-13'],
+          system: expect.stringContaining('task classification assistant'),
           messages: [
             {
               role: 'user',
               content: expect.stringContaining('Complete project documentation'),
             },
           ],
+          output_format: {
+            type: 'json_schema',
+            schema: expect.objectContaining({
+              type: 'object',
+              properties: expect.objectContaining({
+                labels: expect.objectContaining({
+                  type: 'array',
+                  items: expect.objectContaining({
+                    type: 'string',
+                    enum: ['productivity', 'work', 'documentation'],
+                  }),
+                }),
+              }),
+            }),
+          },
         });
 
         expect(result).toEqual({
           taskId: 'task-123',
           labels: ['productivity', 'work'],
-          rawResponse: '["productivity", "work"]',
+          rawResponse: '{"labels": ["productivity", "work"]}',
         });
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
@@ -271,7 +292,6 @@ describe('classifier.ts - Claude AI Classification', () => {
           {
             taskId: 'task-123',
             labels: ['productivity', 'work'],
-            rawResponse: '["productivity", "work"]',
           }
         );
       });
@@ -280,44 +300,50 @@ describe('classifier.ts - Claude AI Classification', () => {
         classificationRequest.availableLabels = [];
 
         const mockResponse = {
-          content: [{ type: 'text', text: '["productivity"]' }],
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         await classifier.classifyTask(classificationRequest);
 
         // Should use all available labels from classifier
-        const promptCall = mockAnthropicClient.messages.create.mock.calls[0][0];
-        expect(promptCall.messages[0].content).toContain('productivity');
-        expect(promptCall.messages[0].content).toContain('work');
-        expect(promptCall.messages[0].content).toContain('personal');
+        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        expect(callArgs.messages[0].content).toContain('productivity');
+        expect(callArgs.messages[0].content).toContain('work');
+        expect(callArgs.messages[0].content).toContain('personal');
+        // Schema should include all default labels
+        expect(callArgs.output_format.schema.properties.labels.items.enum).toContain('productivity');
+        expect(callArgs.output_format.schema.properties.labels.items.enum).toContain('work');
       });
 
       it('should handle empty task description', async () => {
         classificationRequest.description = '';
 
         const mockResponse = {
-          content: [{ type: 'text', text: '["work"]' }],
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: '{"labels": ["work"]}' }],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         await classifier.classifyTask(classificationRequest);
 
-        const promptCall = mockAnthropicClient.messages.create.mock.calls[0][0];
-        expect(promptCall.messages[0].content).toContain('Complete project documentation');
-        expect(promptCall.messages[0].content).not.toContain('**Description:**');
+        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        expect(callArgs.messages[0].content).toContain('Complete project documentation');
+        expect(callArgs.messages[0].content).not.toContain('Description:');
       });
 
       it('should limit labels to maxLabelsPerTask', async () => {
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'text',
-              text: '["productivity", "work", "documentation", "urgent", "project"]', // 5 labels
+              text: '{"labels": ["productivity", "work", "documentation", "urgent", "project"]}',
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
@@ -326,99 +352,81 @@ describe('classifier.ts - Claude AI Classification', () => {
         expect(result.labels).toEqual(['productivity', 'work', 'documentation']);
       });
 
-      it('should filter out invalid labels', async () => {
+      it('should handle structured output with valid labels only', async () => {
+        // With structured outputs, enum constraint ensures only valid labels
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'text',
-              text: '["productivity", "invalid-label", "work"]',
+              text: '{"labels": ["productivity", "work"]}',
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
-        // Should only include valid labels
         expect(result.labels).toEqual(['productivity', 'work']);
       });
 
-      it('should handle malformed JSON response gracefully', async () => {
-        const malformedResponse = 'Here are the labels: ["unclosed_string, "another"]'; // Malformed JSON - unclosed string
+      it('should handle empty labels in structured response', async () => {
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'text',
-              text: malformedResponse,
+              text: '{"labels": []}',
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
         expect(result.labels).toEqual([]);
+      });
+
+      it('should handle refusal response', async () => {
+        const mockResponse = {
+          stop_reason: 'refusal',
+          content: [
+            {
+              type: 'text',
+              text: 'I cannot classify this task.',
+            },
+          ],
+        };
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
+
+        const result = await classifier.classifyTask(classificationRequest);
+
+        expect(result.labels).toEqual([]);
+        expect(result.rawResponse).toBe('Model refused to classify this task');
         expect(mockLogger.warn).toHaveBeenCalledWith(
-          'Failed to parse JSON from response',
-          { response: malformedResponse }
+          'Classification refused by model',
+          { taskId: 'task-123' }
         );
       });
 
-      it('should extract labels from partial JSON', async () => {
+      it('should handle JSON parse error gracefully', async () => {
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'text',
-              text: 'Here are the labels: ["productivity", "work"] for this task.',
+              text: 'not valid json',
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-        const result = await classifier.classifyTask(classificationRequest);
-
-        expect(result.labels).toEqual(['productivity', 'work']);
-      });
-
-      it('should fallback to text extraction when no JSON found', async () => {
-        // Mock labels that appear in text but no JSON array
-        classificationRequest.availableLabels = ['productivity', 'urgent'];
-
-        const mockResponse = {
-          content: [
-            {
-              type: 'text',
-              text: 'This task is about productivity and seems urgent',
-            },
-          ],
-        };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
-
-        const result = await classifier.classifyTask(classificationRequest);
-
-        expect(result.labels).toEqual(['productivity', 'urgent']);
-      });
-
-      it('should handle non-string items in JSON array', async () => {
-        const mockResponse = {
-          content: [
-            {
-              type: 'text',
-              text: '["productivity", 123, "work", null, "documentation"]',
-            },
-          ],
-        };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
-
-        const result = await classifier.classifyTask(classificationRequest);
-
-        // Should filter out non-strings
-        expect(result.labels).toEqual(['productivity', 'work', 'documentation']);
+        await expect(classifier.classifyTask(classificationRequest)).rejects.toThrow();
       });
 
       it('should handle API errors', async () => {
         const apiError = createNetworkError();
-        mockAnthropicClient.messages.create.mockRejectedValue(apiError);
+        mockBetaMessagesCreate.mockRejectedValue(apiError);
 
         await expect(classifier.classifyTask(classificationRequest)).rejects.toThrow(
           'Network request failed'
@@ -433,6 +441,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       it('should handle non-text content in response', async () => {
         const mockResponse = {
+          stop_reason: 'end_turn',
           content: [
             {
               type: 'image', // Non-text content
@@ -440,12 +449,12 @@ describe('classifier.ts - Claude AI Classification', () => {
             },
           ],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
         expect(result.labels).toEqual([]);
-        expect(result.rawResponse).toBe('');
+        expect(result.rawResponse).toBe('{"labels":[]}');
       });
 
       it('should build comprehensive prompt with all task details', async () => {
@@ -457,31 +466,31 @@ describe('classifier.ts - Claude AI Classification', () => {
         };
 
         const mockResponse = {
-          content: [{ type: 'text', text: '["shopping", "food"]' }],
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: '{"labels": ["shopping", "food"]}' }],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         await classifier.classifyTask(detailedRequest);
 
-        const promptCall = mockAnthropicClient.messages.create.mock.calls[0][0];
-        const prompt = promptCall.messages[0].content;
+        const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+        const prompt = callArgs.messages[0].content;
 
         expect(prompt).toContain('Buy groceries for dinner party');
         expect(prompt).toContain('Need to get ingredients for Italian cuisine');
         expect(prompt).toContain('shopping');
         expect(prompt).toContain('food');
         expect(prompt).toContain('social');
-        expect(prompt).toContain('Select 1-5 labels');
-        expect(prompt).toContain('JSON array of label names');
       });
 
       it('should handle edge case with empty available labels list', async () => {
         classificationRequest.availableLabels = [];
 
         const mockResponse = {
-          content: [{ type: 'text', text: '["productivity"]' }],
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
         };
-        mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+        mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
         const result = await classifier.classifyTask(classificationRequest);
 
@@ -506,12 +515,14 @@ describe('classifier.ts - Claude AI Classification', () => {
           },
         ];
 
-        mockAnthropicClient.messages.create
+        mockBetaMessagesCreate
           .mockResolvedValueOnce({
-            content: [{ type: 'text', text: '["productivity", "work"]' }],
+            stop_reason: 'end_turn',
+            content: [{ type: 'text', text: '{"labels": ["productivity", "work"]}' }],
           })
           .mockResolvedValueOnce({
-            content: [{ type: 'text', text: '["health"]' }],
+            stop_reason: 'end_turn',
+            content: [{ type: 'text', text: '{"labels": ["health"]}' }],
           });
 
         const results = await classifier.classifyTasks(requests);
@@ -520,12 +531,12 @@ describe('classifier.ts - Claude AI Classification', () => {
         expect(results[0]).toEqual({
           taskId: 'task-1',
           labels: ['productivity', 'work'],
-          rawResponse: '["productivity", "work"]',
+          rawResponse: '{"labels": ["productivity", "work"]}',
         });
         expect(results[1]).toEqual({
           taskId: 'task-2',
           labels: ['health'],
-          rawResponse: '["health"]',
+          rawResponse: '{"labels": ["health"]}',
         });
       });
 
@@ -546,9 +557,10 @@ describe('classifier.ts - Claude AI Classification', () => {
         ];
 
         const apiError = createNetworkError();
-        mockAnthropicClient.messages.create
+        mockBetaMessagesCreate
           .mockResolvedValueOnce({
-            content: [{ type: 'text', text: '["productivity"]' }],
+            stop_reason: 'end_turn',
+            content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
           })
           .mockRejectedValueOnce(apiError);
 
@@ -558,7 +570,7 @@ describe('classifier.ts - Claude AI Classification', () => {
         expect(results[0]).toEqual({
           taskId: 'task-1',
           labels: ['productivity'],
-          rawResponse: '["productivity"]',
+          rawResponse: '{"labels": ["productivity"]}',
         });
         expect(results[1]).toEqual({
           taskId: 'task-2',
@@ -571,7 +583,7 @@ describe('classifier.ts - Claude AI Classification', () => {
         const results = await classifier.classifyTasks([]);
 
         expect(results).toEqual([]);
-        expect(mockAnthropicClient.messages.create).not.toHaveBeenCalled();
+        expect(mockBetaMessagesCreate).not.toHaveBeenCalled();
       });
     });
   });
@@ -663,14 +675,15 @@ describe('classifier.ts - Claude AI Classification', () => {
       };
 
       const mockResponse = {
-        content: [{ type: 'text', text: '["productivity"]' }],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       await classifier.classifyTask(request);
 
-      const promptCall = mockAnthropicClient.messages.create.mock.calls[0][0];
-      const prompt = promptCall.messages[0].content;
+      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      const prompt = callArgs.messages[0].content;
 
       expect(prompt).toContain('Task with "quotes" and & special chars <script>');
       expect(prompt).toContain('Description with newlines\nand tabs\t');
@@ -686,28 +699,23 @@ describe('classifier.ts - Claude AI Classification', () => {
       };
 
       const mockResponse = {
-        content: [{ type: 'text', text: '["productivity"]' }],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       await classifier.classifyTask(request);
 
-      const promptCall = mockAnthropicClient.messages.create.mock.calls[0][0];
-      expect(promptCall.messages[0].content).toContain(longContent);
+      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain(longContent);
     });
 
-    it('should parse complex JSON responses correctly', async () => {
-      const complexResponse = `
-        Based on the task analysis, here are the appropriate labels:
-        ["productivity", "work"]
-
-        This task involves documentation work which falls under productivity.
-      `;
-
+    it('should parse structured JSON responses correctly', async () => {
       const mockResponse = {
-        content: [{ type: 'text', text: complexResponse }],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["productivity", "work"]}' }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const request: ClassificationRequest = {
         taskId: 'task-123',
@@ -721,17 +729,7 @@ describe('classifier.ts - Claude AI Classification', () => {
       expect(result.labels).toEqual(['productivity', 'work']);
     });
 
-    it('should handle nested JSON arrays in response', async () => {
-      const nestedResponse = `
-        {"analysis": "good task", "labels": ["productivity", "work"]}
-        Also found: ["urgent"]
-      `;
-
-      const mockResponse = {
-        content: [{ type: 'text', text: nestedResponse }],
-      };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
-
+    it('should include enum constraint in schema', async () => {
       const request: ClassificationRequest = {
         taskId: 'task-123',
         content: 'Urgent documentation',
@@ -739,22 +737,26 @@ describe('classifier.ts - Claude AI Classification', () => {
         availableLabels: ['productivity', 'work', 'urgent'],
       };
 
-      const result = await classifier.classifyTask(request);
+      const mockResponse = {
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["productivity", "urgent"]}' }],
+      };
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
-      // Should pick the first valid JSON array
-      expect(result.labels).toEqual(['productivity', 'work']);
+      await classifier.classifyTask(request);
+
+      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      expect(callArgs.output_format.schema.properties.labels.items.enum).toEqual([
+        'productivity', 'work', 'urgent'
+      ]);
     });
 
-    it('should handle case-insensitive label matching in fallback', async () => {
+    it('should use system prompt for classification guidance', async () => {
       const mockResponse = {
-        content: [
-          {
-            type: 'text',
-            text: 'This task is about PRODUCTIVITY and very URGENT work',
-          },
-        ],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["productivity"]}' }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const request: ClassificationRequest = {
         taskId: 'task-123',
@@ -763,9 +765,11 @@ describe('classifier.ts - Claude AI Classification', () => {
         availableLabels: ['productivity', 'urgent'],
       };
 
-      const result = await classifier.classifyTask(request);
+      await classifier.classifyTask(request);
 
-      expect(result.labels).toEqual(['productivity', 'urgent']);
+      const callArgs = mockBetaMessagesCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain('task classification assistant');
+      expect(callArgs.system).toContain('1-5 labels');
     });
   });
 
@@ -785,7 +789,7 @@ describe('classifier.ts - Claude AI Classification', () => {
       const rateLimitError = new Error('Rate limit exceeded');
       rateLimitError.name = 'RateLimitError';
 
-      mockAnthropicClient.messages.create.mockRejectedValueOnce(rateLimitError);
+      mockBetaMessagesCreate.mockRejectedValueOnce(rateLimitError);
 
       const request: ClassificationRequest = {
         taskId: 'task-123',
@@ -801,7 +805,7 @@ describe('classifier.ts - Claude AI Classification', () => {
       const authError = new Error('Invalid API key');
       authError.name = 'AuthenticationError';
 
-      mockAnthropicClient.messages.create.mockRejectedValue(authError);
+      mockBetaMessagesCreate.mockRejectedValue(authError);
 
       const request: ClassificationRequest = {
         taskId: 'task-123',
@@ -824,9 +828,10 @@ describe('classifier.ts - Claude AI Classification', () => {
       };
 
       const mockResponse = {
-        content: [{ type: 'text', text: JSON.stringify(manyLabels.slice(0, 3)) }],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify({ labels: manyLabels.slice(0, 3) }) }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const result = await classifier.classifyTask(request);
 
@@ -844,9 +849,10 @@ describe('classifier.ts - Claude AI Classification', () => {
       };
 
       const mockResponse = {
-        content: [{ type: 'text', text: '["工作", "émojis🚀"]' }],
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"labels": ["工作", "émojis🚀"]}' }],
       };
-      mockAnthropicClient.messages.create.mockResolvedValue(mockResponse);
+      mockBetaMessagesCreate.mockResolvedValue(mockResponse);
 
       const result = await classifier.classifyTask(request);
 

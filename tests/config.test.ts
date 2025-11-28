@@ -48,7 +48,7 @@ describe('config.ts - Configuration Management', () => {
       expect(config.anthropicApiKey).toBe('test-anthropic-key');
 
       // Verify defaults
-      expect(config.anthropicModel).toBe('claude-haiku-4-5-20251001');
+      expect(config.anthropicModel).toBe('claude-sonnet-4-5-20250929');
       expect(config.maxLabelsPerTask).toBe(5);
       expect(config.pollIntervalMs).toBe(15000);
       expect(config.maxErrorLogs).toBe(1000);

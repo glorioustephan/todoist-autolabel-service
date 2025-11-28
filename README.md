@@ -6,7 +6,8 @@ An intelligent task classification service for Todoist that automatically labels
 
 - **Incremental Sync**: Efficiently polls Todoist every 15 seconds using incremental sync
 - **Claude AI Classification**: Uses Claude API for accurate, reliable task classification
-- **Configurable Model**: Choose between Haiku (fast/cheap), Sonnet, or Opus
+- **Structured Outputs**: Guarantees valid JSON responses with schema-constrained label selection
+- **Configurable Model**: Choose between different Claude models based on speed/quality needs
 - **SQLite Persistence**: Tracks classification state and errors in a local database
 - **PM2 Management**: Production-ready with automatic restarts and log management
 - **Inbox-Only Processing**: Only classifies tasks in your Todoist Inbox
@@ -66,9 +67,17 @@ npm run pm2:start
 
 1. **Poll**: Every 15 seconds, syncs with Todoist using incremental sync
 2. **Filter**: Only processes new/changed tasks in the Inbox
-3. **Classify**: Sends task to Claude API with your label taxonomy
+3. **Classify**: Sends task to Claude API with your label taxonomy using Structured Outputs
 4. **Apply**: Updates task labels in Todoist
 5. **Track**: Records classification state in SQLite
+
+### Structured Outputs
+
+The classifier uses Claude's [Structured Outputs](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) feature to guarantee valid JSON responses. This ensures:
+
+- **Always valid JSON**: No parsing errors or malformed responses
+- **Schema-constrained labels**: Only labels from your taxonomy can be returned
+- **No retries needed**: Eliminates retry logic for schema violations
 
 ## Scripts
 
@@ -90,7 +99,7 @@ Environment variables (`.env`):
 |----------|---------|-------------|
 | `TODOIST_API_TOKEN` | Required | Todoist API token |
 | `ANTHROPIC_API_KEY` | Required | Claude API key |
-| `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | Claude model to use |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-5-20250929` | Claude model to use |
 | `MAX_LABELS_PER_TASK` | `5` | Max labels per task |
 | `POLL_INTERVAL_MS` | `15000` | Polling interval |
 | `MAX_ERROR_LOGS` | `1000` | Max error log entries |
@@ -99,15 +108,17 @@ Environment variables (`.env`):
 
 ### Available Models
 
-- `claude-haiku-4-5-20251001` - Fastest, cheapest (~$0.25/1M tokens)
-- `claude-sonnet-4-5-20250929` - Best balance of speed/quality
-- `claude-opus-4-5-20251101` - Highest quality, slowest
+| Model | Speed | Cost | Best For |
+|-------|-------|------|----------|
+| `claude-sonnet-4-5-20250929` | Fast | ~$3/1M tokens | Recommended default |
+| `claude-opus-4-20250514` | Slower | ~$15/1M tokens | Complex taxonomies |
+
+> **Note**: Structured Outputs requires Claude Sonnet 4.5 or Claude Opus 4. Other models are not supported.
 
 ## Labels
 
-Labels are defined in `./labels.json`. The service will classify tasks using these labels.
+Labels are defined in `./labels.json`. The service will classify tasks using these labels. The Structured Outputs feature ensures Claude can only return labels that exist in your taxonomy.
 
 ## License
 
 ISC
-
