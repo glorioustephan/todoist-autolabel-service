@@ -17,8 +17,8 @@ An intelligent task classification service for Todoist that automatically labels
 ### 1. Install Dependencies
 
 ```bash
-npm install
-npm install -g pm2
+pnpm install
+pnpm install -g pm2
 ```
 
 ### 2. Configure Environment
@@ -33,8 +33,8 @@ ANTHROPIC_API_KEY=your_key_here
 ### 3. Build and Run
 
 ```bash
-npm run build
-npm run pm2:start
+pnpm run build
+pnpm run pm2:start
 ```
 
 ## Documentation
@@ -83,13 +83,13 @@ The classifier uses Claude's [Structured Outputs](https://docs.anthropic.com/en/
 
 | Command | Description |
 |---------|-------------|
-| `npm run build` | Compile TypeScript |
-| `npm run dev` | Run in development mode |
-| `npm run pm2:start` | Start with PM2 |
-| `npm run pm2:stop` | Stop PM2 process |
-| `npm run pm2:restart` | Restart PM2 process |
-| `npm run pm2:logs` | View PM2 logs |
-| `npm run pm2:status` | Check PM2 status |
+| `pnpm run build` | Compile TypeScript |
+| `pnpm run dev` | Run in development mode |
+| `pnpm run pm2:start` | Start with PM2 |
+| `pnpm run pm2:stop` | Stop PM2 process |
+| `pnpm run pm2:restart` | Restart PM2 process |
+| `pnpm run pm2:logs` | View PM2 logs |
+| `pnpm run pm2:status` | Check PM2 status |
 
 ## Configuration
 

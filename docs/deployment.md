@@ -21,13 +21,13 @@ PM2 is a production process manager for Node.js that provides:
 Always build before deploying:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 ### Start with PM2
 
 ```bash
-npm run pm2:start
+pnpm run pm2:start
 ```
 
 This starts the service using the configuration in `ecosystem.config.cjs`.
@@ -35,7 +35,7 @@ This starts the service using the configuration in `ecosystem.config.cjs`.
 ### Verify It's Running
 
 ```bash
-npm run pm2:status
+pnpm run pm2:status
 ```
 
 You should see output like:
@@ -52,7 +52,7 @@ You should see output like:
 ### Real-time Logs
 
 ```bash
-npm run pm2:logs
+pnpm run pm2:logs
 ```
 
 ### Log Files
@@ -73,13 +73,13 @@ tail -f logs/pm2-out.log
 ### Stop
 
 ```bash
-npm run pm2:stop
+pnpm run pm2:stop
 ```
 
 ### Restart
 
 ```bash
-npm run pm2:restart
+pnpm run pm2:restart
 ```
 
 ### Delete from PM2
@@ -113,7 +113,7 @@ pm2 save
 Reboot your Mac Mini and verify the service starts automatically:
 
 ```bash
-npm run pm2:status
+ppnpm run pm2:status
 ```
 
 ## PM2 Configuration
@@ -182,19 +182,19 @@ git pull origin main
 ### 2. Install Dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 3. Rebuild
 
 ```bash
-npm run build
+ppnpm run build
 ```
 
 ### 4. Restart Service
 
 ```bash
-npm run pm2:restart
+ppnpm run pm2:restart
 ```
 
 ## Database Management
@@ -218,9 +218,9 @@ To force a full resync:
 3. Start the service
 
 ```bash
-npm run pm2:stop
+pnpm run pm2:stop
 rm data/todoist.db
-npm run pm2:start
+pnpm run pm2:start
 ```
 
 ### View Error Logs in Database
@@ -242,7 +242,7 @@ sqlite3 data/todoist.db "SELECT id, content, classified, labels FROM tasks ORDER
 Check the logs for errors:
 
 ```bash
-npm run pm2:logs --lines 100
+pnpm run pm2:logs --lines 100
 ```
 
 Common causes:
@@ -255,7 +255,7 @@ Common causes:
 The service uses minimal memory (~50-100MB) since classification is done via API calls. If memory issues occur:
 
 1. Check for memory leaks in logs
-2. Restart the service: `npm run pm2:restart`
+2. Restart the service: `ppnpm run pm2:restart`
 
 ### Service Not Starting on Boot
 

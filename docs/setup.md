@@ -5,10 +5,20 @@ This guide walks you through setting up the Todoist Autolabel Service.
 ## Prerequisites
 
 - **Node.js** v18 or higher
-- **npm** (comes with Node.js)
+- **pnpm** (fast, disk space efficient package manager)
 - **PM2** (will be installed globally)
 - Todoist account with API access
 - Anthropic API key for Claude classification
+
+### Installing pnpm
+
+If you don't have pnpm installed:
+
+```bash
+npm install -g pnpm
+# or
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
 
 ## Installation
 
@@ -16,13 +26,13 @@ This guide walks you through setting up the Todoist Autolabel Service.
 
 ```bash
 cd /path/to/todoist
-npm install
+pnpm install
 ```
 
 ### 2. Install PM2 Globally
 
 ```bash
-npm install -g pm2
+pnpm install -g pm2
 ```
 
 ### 3. Configure Environment Variables
@@ -79,7 +89,7 @@ The Structured Outputs feature ensures Claude can only return labels that exist 
 Compile TypeScript to JavaScript:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 ## First Run
@@ -87,7 +97,7 @@ npm run build
 Test the service manually first:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 On first run, the service will:
@@ -174,12 +184,12 @@ The Anthropic API key is required. Add it to your `.env` file.
 1. Ensure tasks are in your Inbox (other projects are ignored)
 2. Check Claude API key is valid
 3. Ensure you're using a supported model (Sonnet 4.5 or Opus 4)
-4. View logs: `npm run pm2:logs`
+4. View logs: `pnpm run pm2:logs`
 
 ### Database locked errors
 Only one instance of the service should run. Stop any existing instances:
 ```bash
-npm run pm2:stop
+pnpm run pm2:stop
 ```
 
 ### API Rate Limiting
