@@ -44,23 +44,32 @@ pnpm run pm2:start
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     PM2 Process Manager                         │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │   Sync Loop  │───▶│   Claude AI  │───▶│  Todoist Update  │  │
-│  │  (15s poll)  │    │  Classifier  │    │      API         │  │
-│  └──────────────┘    └──────────────┘    └──────────────────┘  │
-│         │                   │                     │             │
-│         ▼                   ▼                     ▼             │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    SQLite Database                          ││
-│  │  ┌─────────┐  ┌───────────────┐  ┌──────────────────────┐  ││
-│  │  │  tasks  │  │  sync_state   │  │     error_logs       │  ││
-│  │  └─────────┘  └───────────────┘  └──────────────────────┘  ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph PM2["PM2 Process Manager"]
+        SyncLoop["Sync Loop<br/>(15s poll)"]
+        Claude["Claude AI<br/>Classifier"]
+        Todoist["Todoist Update<br/>API"]
+        
+        SyncLoop -->|Classify tasks| Claude
+        Claude -->|Apply labels| Todoist
+        
+        subgraph DB["SQLite Database"]
+            Tasks[(tasks)]
+            SyncState[(sync_state)]
+            ErrorLogs[(error_logs)]
+        end
+        
+        SyncLoop -.->|Read/Write| DB
+        Claude -.->|Log errors| DB
+        Todoist -.->|Update state| DB
+    end
+    
+    style PM2 fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style DB fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style SyncLoop fill:#c8e6c9,stroke:#2e7d32
+    style Claude fill:#f3e5f5,stroke:#6a1b9a
+    style Todoist fill:#ffe0b2,stroke:#e65100
 ```
 
 ## How It Works
