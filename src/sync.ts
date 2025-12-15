@@ -160,9 +160,6 @@ export class SyncManager {
       attempts,
     });
 
-    // Mark attempt
-    db.markTaskAttempted(task.id);
-
     try {
       // Classify the task
       const result = await classifier.classifyTask({
@@ -174,6 +171,8 @@ export class SyncManager {
 
       if (!result.success) {
         logger.error('Classification failed', new Error(result.error), { taskId: task.id });
+        
+        // Increment attempt counter after failure
         db.markTaskAttempted(task.id);
 
         // Check if max attempts reached
@@ -187,6 +186,9 @@ export class SyncManager {
 
       if (result.data.labels.length === 0) {
         logger.warn('No labels assigned to task', { taskId: task.id });
+
+        // Increment attempt counter after no labels returned
+        db.markTaskAttempted(task.id);
 
         // Check if max attempts reached
         if (attempts + 1 >= MAX_ATTEMPTS) {
@@ -203,9 +205,10 @@ export class SyncManager {
       }
 
       // Apply labels to task in Todoist
+      // This must succeed before we mark as classified in the database
       await api.updateTaskLabels(task.id, [...result.data.labels]);
 
-      // Mark as classified in database
+      // Only mark as classified in database after BOTH APIs succeeded
       db.markTaskClassified(task.id, [...result.data.labels]);
 
       logger.success('Task classified', {
@@ -216,6 +219,9 @@ export class SyncManager {
       return { success: true, skipped: false };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Increment attempt counter after exception
+      db.markTaskAttempted(task.id);
 
       // Log error to database
       db.logError(
