@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/glorioustephan/todoist-autolabel-service/compare/todoist-autolabel-v1.0.0...todoist-autolabel-v1.1.0) (2026-05-11)
+
+
+### Features
+
+* **sync:** backfill previously-failed Inbox tasks on start and on a slow sweep ([69afd86](https://github.com/glorioustephan/todoist-autolabel-service/commit/69afd8626cf6bdcaf29fa944725e2fe88c21b03a))
+* **sync:** retry previously-failed Inbox tasks on boot and on a slow sweep ([d3ee142](https://github.com/glorioustephan/todoist-autolabel-service/commit/d3ee142be588c03f97d26d6653b665b66764f6ae))
+
 ## 1.0.0 (2026-05-11)
 
 
