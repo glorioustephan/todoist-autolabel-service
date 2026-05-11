@@ -1,202 +1,154 @@
 # Setup Guide
 
-This guide walks you through setting up the Todoist Autolabel Service.
+This guide walks you through standing up the autolabel service on your own machine.
+
+For an overview, see the [README](../README.md).
 
 ## Prerequisites
 
-- **Node.js** v18 or higher
-- **pnpm** (fast, disk space efficient package manager)
-- **PM2** (will be installed globally)
-- Todoist account with API access
-- Anthropic API key for Claude classification
+- **Node.js** ≥ 18.17
+- A **Todoist** account with API access
+- An **Anthropic** API key (Claude)
+- *(Recommended)* **pnpm** ≥ 10, or **npm** / **yarn** / **bun** — any will work as long as you can run a Node bin.
 
-### Installing pnpm
+## Install
 
-If you don't have pnpm installed:
+### Option A — run directly with `npx`
 
-```bash
-npm install -g pnpm
-# or
-curl -fsSL https://get.pnpm.io/install.sh | sh -
-```
-
-## Installation
-
-### 1. Clone and Install Dependencies
+No install required:
 
 ```bash
-cd /path/to/todoist
-pnpm install
+npx @glorioustephan/todoist-autolabel
 ```
 
-### 2. Install PM2 Globally
+`npx` will resolve the latest published version and run it against the `.env` and `labels.json` files in your current directory.
+
+### Option B — pin in a project
 
 ```bash
-pnpm install -g pm2
+pnpm add @glorioustephan/todoist-autolabel
 ```
 
-### 3. Configure Environment Variables
-
-Create a `.env` file in the project root:
+Then either invoke it via the project's package scripts, or run the bin:
 
 ```bash
-# Required
-TODOIST_API_TOKEN=your_todoist_api_token_here
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-
-# Claude Configuration (Structured Outputs requires Sonnet 4.5 or Opus 4)
-ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
-MAX_LABELS_PER_TASK=5
-
-# Service Configuration (defaults shown)
-POLL_INTERVAL_MS=15000
-MAX_ERROR_LOGS=1000
-DB_PATH=./data/todoist.db
-LOG_LEVEL=info
+pnpm exec todoist-autolabel
 ```
 
-### Getting Your API Tokens
+## Configure
 
-#### Todoist API Token
-1. Go to [Todoist Integrations Settings](https://todoist.com/app/settings/integrations/developer)
-2. Scroll down to "API token"
-3. Copy your token
+The service reads configuration from **two files in the current working directory**:
 
-#### Anthropic API Key
-1. Go to [Anthropic Console](https://console.anthropic.com/)
-2. Create an account or sign in
-3. Navigate to API Keys
-4. Create a new key
+### `.env`
 
-## Labels Configuration
+Copy the template and fill in your credentials:
 
-The service uses labels defined in `./labels.json`. This file should contain your label taxonomy and match what is in Todoist:
+```bash
+cp node_modules/@glorioustephan/todoist-autolabel/env.example .env
+```
+
+The only required variables are:
+
+```bash
+TODOIST_API_TOKEN=your_todoist_token
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+Everything else has a sensible default — see the [full env reference](#environment-variables-reference) below.
+
+### `labels.json`
+
+This is your Todoist label taxonomy. Every entry must already exist as a label in Todoist.
+
+A starting point (red/grey themed to match Todoist's palette) is published with the package as `labels.example.json`:
 
 ```json
 {
   "labels": [
-    { "name": "home-and-property", "color": "teal" },
-    { "name": "financial", "color": "blue" },
-    { "name": "health", "color": "green" }
+    { "name": "urgent",   "color": "red" },
+    { "name": "waiting",  "color": "grey" },
+    { "name": "errands",  "color": "red" },
+    { "name": "work",     "color": "berry_red" },
+    { "name": "personal", "color": "grey" }
   ]
 }
 ```
 
-The Structured Outputs feature ensures Claude can only return labels that exist in your taxonomy.
+Save your taxonomy as `labels.json` in the same directory as `.env`. The `color` values use [Todoist's named palette](https://developer.todoist.com/api/v1/#tag/Labels) (e.g. `red`, `berry_red`, `grey`, `charcoal`, `taupe`, `sky_blue`, …).
 
-## Build the Service
+## Get your API tokens
 
-Compile TypeScript to JavaScript:
+### Todoist
+
+1. Open Todoist → Settings → **Integrations** → **Developer** tab.
+2. Copy the **API token** at the bottom of the page.
+
+### Anthropic
+
+1. Sign in at <https://console.anthropic.com/>.
+2. Go to **API Keys** and create a new key.
+3. Make sure your account has credits / a billing method attached.
+
+## First run
 
 ```bash
-pnpm run build
+npx @glorioustephan/todoist-autolabel
 ```
 
-## First Run
+On boot the service will:
 
-Test the service manually first:
+1. Validate `.env` and connect to the Anthropic + Todoist APIs.
+2. Resolve your Inbox project (walking pagination if necessary).
+3. Open / create the SQLite DB at `DB_PATH`.
+4. Begin its sync loop — every `POLL_INTERVAL_MS` it pulls Inbox tasks without labels and classifies them.
 
-```bash
-pnpm run dev
-```
+Stop it with `Ctrl+C`. The shutdown handler closes the DB cleanly.
 
-On first run, the service will:
-1. Connect to Claude API
-2. Perform a full sync with Todoist
-3. Begin classifying unclassified tasks in your Inbox
+## Environment variables reference
 
-## Directory Structure
+| Variable              | Required | Default                                  | Description                                              |
+| --------------------- | -------- | ---------------------------------------- | -------------------------------------------------------- |
+| `TODOIST_API_TOKEN`   | yes      | —                                        | Todoist API token                                        |
+| `ANTHROPIC_API_KEY`   | yes      | —                                        | Anthropic API key                                        |
+| `ANTHROPIC_MODEL`     | no       | `claude-haiku-4-5-20251001`              | Any Claude model with Structured Outputs support        |
+| `MAX_LABELS_PER_TASK` | no       | `5`                                      | Hard cap on labels per task                              |
+| `POLL_INTERVAL_MS`    | no       | `15000`                                  | Polling interval in ms                                   |
+| `MAX_ERROR_LOGS`      | no       | `1000`                                   | FIFO cap on `error_logs`                                 |
+| `DB_PATH`             | no       | `<cwd>/data/todoist.db`                  | SQLite DB location                                       |
+| `LABELS_PATH`         | no       | `<cwd>/labels.json`                      | Override the labels file location                        |
+| `LOG_LEVEL`           | no       | `info`                                   | `debug` &#124; `info` &#124; `warn` &#124; `error`       |
 
-After setup, your project should have:
+## Supported Claude models
 
-```
-todoist/
-├── data/              # SQLite database (created automatically)
-│   └── todoist.db
-├── dist/              # Compiled JavaScript
-├── docs/              # Documentation
-├── logs/              # PM2 logs (created when using PM2)
-├── src/               # TypeScript source
-├── labels.json        # Label taxonomy
-├── .env               # Environment variables
-├── ecosystem.config.cjs  # PM2 configuration
-└── package.json
-```
+Structured Outputs (and therefore this service) requires **Claude Haiku 4.5+, Sonnet 4.5+, or Opus 4+**. Earlier models will fail at the API.
 
-## Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `TODOIST_API_TOKEN` | Yes | - | Your Todoist API token |
-| `ANTHROPIC_API_KEY` | Yes | - | Claude API key for classification |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-5-20250929` | Claude model to use |
-| `MAX_LABELS_PER_TASK` | No | `5` | Maximum labels to assign per task |
-| `POLL_INTERVAL_MS` | No | `15000` | Polling interval in milliseconds |
-| `MAX_ERROR_LOGS` | No | `1000` | Max error log entries before purge |
-| `DB_PATH` | No | `./data/todoist.db` | SQLite database path |
-| `LOG_LEVEL` | No | `info` | Log level (debug, info, warn, error) |
-
-## Claude Model Options
-
-| Model | Speed | Cost | Best For |
-|-------|-------|------|----------|
-| `claude-sonnet-4-5-20250929` | Fast | ~$3/1M tokens | Recommended default |
-| `claude-opus-4-20250514` | Slower | ~$15/1M tokens | Complex taxonomies |
-
-> **Note**: This service uses Claude's Structured Outputs feature, which requires Claude Sonnet 4.5 or Claude Opus 4.
-
-## Classification Behavior
-
-### How It Works
-1. Service polls Todoist every 15 seconds using incremental sync
-2. New/changed tasks in the Inbox are identified
-3. Tasks without labels are sent to Claude for classification
-4. Claude analyzes the task and returns labels using Structured Outputs
-5. Labels are applied to the task in Todoist
-6. Classification state is recorded in SQLite
-
-### Structured Outputs
-
-The classifier uses Claude's [Structured Outputs](https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs) feature to guarantee:
-- Valid JSON responses (no parsing errors)
-- Only labels from your taxonomy can be returned
-- No retry logic needed for malformed responses
-
-### Retry Logic
-- Failed classifications are retried on subsequent poll cycles
-- Maximum 3 attempts per task
-- Errors are logged to SQLite for debugging
-
-### API Credits
-- If Claude API credits are exhausted, errors are logged
-- Tasks will be retried when credits are available
-- Monitor your Anthropic dashboard for usage
+| Model                            | Speed   | Cost (in/out per 1M)  | Best for                       |
+| -------------------------------- | ------- | --------------------- | ------------------------------ |
+| `claude-haiku-4-5-20251001`      | Fastest | ~$1 / ~$5             | Default — cheapest and fastest |
+| `claude-sonnet-4-5-20250929`     | Fast    | ~$3 / ~$15            | Subtle / ambiguous taxonomies  |
+| `claude-opus-4-20250514`         | Slower  | ~$15 / ~$75           | Very large taxonomies          |
 
 ## Troubleshooting
 
-### "TODOIST_API_TOKEN environment variable is not set"
-Ensure your `.env` file exists and contains the token.
+### `TODOIST_API_TOKEN environment variable is not set`
+The CLI loads `.env` from the **current working directory**, not from where the package is installed. Make sure you're running the command from the directory that holds your `.env`.
 
-### "ANTHROPIC_API_KEY environment variable is not set"
-The Anthropic API key is required. Add it to your `.env` file.
+### `Could not find Todoist Inbox project`
+The token does not have access to a project flagged `inboxProject`. Double-check the token belongs to the right account, or regenerate it from the Todoist developer settings.
 
-### Tasks not being classified
-1. Ensure tasks are in your Inbox (other projects are ignored)
-2. Check Claude API key is valid
-3. Ensure you're using a supported model (Sonnet 4.5 or Opus 4)
-4. View logs: `pnpm run pm2:logs`
+### Tasks aren't being classified
+1. Make sure the tasks are in your **Inbox** — the service intentionally ignores other projects.
+2. Make sure the tasks have no labels yet — labelled tasks are skipped to avoid clobbering manual work.
+3. Confirm the model in `ANTHROPIC_MODEL` is one of the supported ones above.
+4. Re-run with `LOG_LEVEL=debug` for verbose output.
 
-### Database locked errors
-Only one instance of the service should run. Stop any existing instances:
-```bash
-pnpm run pm2:stop
-```
+### `Database locked`
+Only one instance of the service should run against a given `DB_PATH` at a time. Stop the duplicate, or point one of them at a different `DB_PATH`.
 
-### API Rate Limiting
-If you see rate limit errors:
-1. Increase `POLL_INTERVAL_MS` in `.env`
-2. The service has built-in 200ms delays between API calls
+### Rate-limit errors from Todoist
+The service inserts a 200 ms delay between writes, but if you have a lot of unlabelled tasks plus heavy other Todoist usage, raise `POLL_INTERVAL_MS` (e.g. to `300000` for 5 min).
 
-## Next Steps
+## Next steps
 
-See [deployment.md](./deployment.md) for instructions on running the service with PM2.
+- [Deployment guide](./deployment.md) for running this as a long-lived daemon (PM2, systemd, Docker).
+- [CONTRIBUTING.md](../CONTRIBUTING.md) if you want to hack on the codebase itself.

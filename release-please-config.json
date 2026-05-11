@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "packages": {
+    ".": {
+      "package-name": "@glorioustephan/todoist-autolabel",
+      "changelog-path": "CHANGELOG.md",
+      "include-v-in-tag": true,
+      "draft": false,
+      "prerelease": false,
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
+    }
+  },
+  "pull-request-title-pattern": "chore: release ${version}",
+  "separate-pull-requests": false,
+  "plugins": ["node-workspace"]
+}

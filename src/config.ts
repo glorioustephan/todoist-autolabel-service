@@ -4,22 +4,22 @@
 
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import type { Config, LogLevel } from './types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..');
-
 /**
- * Resolve a path relative to the project root
+ * Resolve a path relative to the user's current working directory.
+ *
+ * The service is published as an npm package, so the package root lives
+ * inside the consumer's `node_modules` and must NOT be used to anchor
+ * runtime files (`.env`, `labels.json`, the SQLite DB). Those belong to
+ * the consumer and live next to wherever the CLI was invoked.
  */
-function resolveFromRoot(...pathSegments: string[]): string {
-  return path.resolve(projectRoot, ...pathSegments);
+function resolveFromCwd(...pathSegments: string[]): string {
+  return path.resolve(process.cwd(), ...pathSegments);
 }
 
-// Load .env file from project root
-dotenv.config({ path: resolveFromRoot('.env') });
+// Load .env file from the consumer's working directory.
+dotenv.config({ path: resolveFromCwd('.env') });
 
 /**
  * Validates that a required environment variable is set
@@ -79,11 +79,11 @@ export function loadConfig(): Config {
     // Service configuration
     pollIntervalMs: getEnvNumber('POLL_INTERVAL_MS', 15000),
     maxErrorLogs: getEnvNumber('MAX_ERROR_LOGS', 1000),
-    dbPath: getEnv('DB_PATH', resolveFromRoot('data', 'todoist.db')),
+    dbPath: getEnv('DB_PATH', resolveFromCwd('data', 'todoist.db')),
     logLevel: validateLogLevel(getEnv('LOG_LEVEL', 'info')),
 
-    // Paths
-    labelsPath: resolveFromRoot('labels.json'),
+    // Paths (resolved from CWD; override either with an env var)
+    labelsPath: getEnv('LABELS_PATH', resolveFromCwd('labels.json')),
   };
 }
 

@@ -1,5 +1,9 @@
+#!/usr/bin/env node
 /**
  * Main entry point for Todoist Autolabel Service
+ *
+ * Wired up as the package `bin` so consumers can run `npx todoist-autolabel`
+ * from any directory; configuration is loaded from the CWD's `.env`.
  */
 
 import { loadConfig, getConfig } from './config.js';

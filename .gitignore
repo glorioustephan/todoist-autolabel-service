@@ -9,6 +9,9 @@ dist/
 .env
 .env.local
 
+# User-specific runtime label taxonomy (ship labels.example.json instead).
+labels.json
+
 # Data and cache
 data/
 .cache/
