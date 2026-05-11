@@ -414,6 +414,64 @@ describe('database.ts - Database Operations', () => {
         });
       });
 
+      describe('resetFailedTasksForRetry()', () => {
+        beforeEach(() => {
+          dbManager = new DatabaseManager(config);
+        });
+
+        it('should be a no-op (no DB call) when given an empty list', () => {
+          mockDatabase.prepare.mockClear();
+
+          const count = dbManager.resetFailedTasksForRetry([], 3_600_000);
+
+          expect(count).toBe(0);
+          expect(mockDatabase.prepare).not.toHaveBeenCalled();
+        });
+
+        it('should run a single UPDATE with one placeholder per task id', () => {
+          mockStatement.run.mockReturnValue({ changes: 2 });
+
+          const count = dbManager.resetFailedTasksForRetry(
+            ['task-a', 'task-b', 'task-c'],
+            3_600_000
+          );
+
+          expect(mockDatabase.prepare).toHaveBeenCalledTimes(1);
+          const sql = mockDatabase.prepare.mock.calls[0]![0] as string;
+          // 3 task placeholders + 1 cutoff timestamp placeholder
+          expect((sql.match(/\?/g) ?? []).length).toBe(4);
+          expect(sql).toContain("status = 'pending'");
+          expect(sql).toContain('attempts = 0');
+          expect(sql).toContain("status = 'failed'");
+          expect(count).toBe(2);
+        });
+
+        it('should pass a cutoff timestamp derived from cooldownMs', () => {
+          const before = Date.now();
+          mockStatement.run.mockReturnValue({ changes: 0 });
+
+          dbManager.resetFailedTasksForRetry(['task-1'], 3_600_000);
+
+          const args = mockStatement.run.mock.calls[0]!;
+          // Args: ...taskIds, cutoff
+          const cutoffArg = args[args.length - 1] as string;
+          const cutoffMs = new Date(cutoffArg).getTime();
+
+          // Cutoff should be roughly (now - cooldown), allowing for the
+          // few ms that elapsed during the call.
+          expect(before - 3_600_000 - 50).toBeLessThanOrEqual(cutoffMs);
+          expect(cutoffMs).toBeLessThanOrEqual(Date.now() - 3_600_000 + 50);
+        });
+
+        it('should return the number of rows reported by SQLite', () => {
+          mockStatement.run.mockReturnValue({ changes: 7 });
+
+          const count = dbManager.resetFailedTasksForRetry(['t1', 't2'], 0);
+
+          expect(count).toBe(7);
+        });
+      });
+
       describe('taskNeedsClassification()', () => {
         it('should return true for non-existent task', () => {
           mockStatement.get.mockReturnValue(undefined);

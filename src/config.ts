@@ -53,6 +53,22 @@ function getEnvNumber(name: string, defaultValue: number): number {
 }
 
 /**
+ * Gets an optional environment variable as a boolean.
+ *
+ * Truthy strings: "1", "true", "yes", "on" (case-insensitive).
+ * Falsy strings: "0", "false", "no", "off" (case-insensitive).
+ * Anything else throws.
+ */
+function getEnvBoolean(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return defaultValue;
+  const lower = raw.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+  throw new Error(`${name} must be a boolean (true/false), got: ${raw}`);
+}
+
+/**
  * Validates the log level
  */
 function validateLogLevel(level: string): LogLevel {
@@ -81,6 +97,11 @@ export function loadConfig(): Config {
     maxErrorLogs: getEnvNumber('MAX_ERROR_LOGS', 1000),
     dbPath: getEnv('DB_PATH', resolveFromCwd('data', 'todoist.db')),
     logLevel: validateLogLevel(getEnv('LOG_LEVEL', 'info')),
+
+    // Backfill / retry sweep
+    backfillOnStart: getEnvBoolean('BACKFILL_ON_START', true),
+    backfillIntervalMs: getEnvNumber('BACKFILL_INTERVAL_MS', 86_400_000),
+    backfillCooldownMs: getEnvNumber('BACKFILL_COOLDOWN_MS', 3_600_000),
 
     // Paths (resolved from CWD; override either with an env var)
     labelsPath: getEnv('LABELS_PATH', resolveFromCwd('labels.json')),

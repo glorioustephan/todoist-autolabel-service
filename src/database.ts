@@ -262,6 +262,42 @@ export class DatabaseManager {
   }
 
   /**
+   * Reset previously-failed tasks back to `pending` so the next sync cycle
+   * picks them up again.
+   *
+   * A task is reset only when ALL of these hold:
+   *   1. Its `task_id` is in `taskIds` (i.e. it's currently in the Inbox
+   *      and still unlabelled — the caller has already filtered).
+   *   2. It's in a terminal-retry state: `status='failed'` OR
+   *      `attempts >= 3` (the per-cycle attempt cap).
+   *   3. Its last attempt is older than `cooldownMs` ago, or it has
+   *      never been attempted. This prevents a perma-failing task from
+   *      consuming classifier calls on every reconciliation tick.
+   *
+   * Returns the number of rows actually reset.
+   */
+  resetFailedTasksForRetry(taskIds: readonly string[], cooldownMs: number): number {
+    if (taskIds.length === 0) return 0;
+
+    // SQLite's `?` parameters don't support array binding directly; build
+    // the placeholder list to match the input length.
+    const placeholders = taskIds.map(() => '?').join(',');
+    const cutoff = new Date(Date.now() - cooldownMs).toISOString();
+
+    const stmt = this.db.prepare(`
+      UPDATE tasks SET
+        status = 'pending',
+        attempts = 0,
+        updated_at = datetime('now')
+      WHERE task_id IN (${placeholders})
+        AND (status = 'failed' OR attempts >= 3)
+        AND (last_attempt_at IS NULL OR last_attempt_at < ?)
+    `);
+    const result = stmt.run(...taskIds, cutoff);
+    return result.changes;
+  }
+
+  /**
    * Mark task as skipped (e.g., already has labels)
    */
   markTaskSkipped(taskId: string): void {

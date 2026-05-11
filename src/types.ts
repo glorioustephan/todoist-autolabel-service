@@ -42,6 +42,14 @@ export interface Config {
   readonly dbPath: string;
   readonly logLevel: LogLevel;
 
+  // Backfill / retry sweep configuration
+  /** On service start, reset previously-failed Inbox tasks so they get re-classified. */
+  readonly backfillOnStart: boolean;
+  /** Periodically reset previously-failed Inbox tasks (ms). 0 disables. */
+  readonly backfillIntervalMs: number;
+  /** Minimum gap between successive retries of the same task (ms). Prevents hot loops. */
+  readonly backfillCooldownMs: number;
+
   // Paths
   readonly labelsPath: string;
 }

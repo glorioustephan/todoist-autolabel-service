@@ -55,6 +55,66 @@ describe('config.ts - Configuration Management', () => {
       expect(config.logLevel).toBe('info');
       expect(config.dbPath).toContain('data/todoist.db');
       expect(config.labelsPath).toContain('labels.json');
+      expect(config.backfillOnStart).toBe(true);
+      expect(config.backfillIntervalMs).toBe(86_400_000);
+      expect(config.backfillCooldownMs).toBe(3_600_000);
+    });
+
+    it('should respect overrides for backfill / retry sweep settings', () => {
+      const config = withTestEnv(
+        {
+          TODOIST_API_TOKEN: 'test-todoist-token',
+          ANTHROPIC_API_KEY: 'test-anthropic-key',
+          BACKFILL_ON_START: 'false',
+          BACKFILL_INTERVAL_MS: '0',
+          BACKFILL_COOLDOWN_MS: '60000',
+        },
+        () => loadConfig()
+      );
+
+      expect(config.backfillOnStart).toBe(false);
+      expect(config.backfillIntervalMs).toBe(0);
+      expect(config.backfillCooldownMs).toBe(60_000);
+    });
+
+    it('should accept common truthy/falsy strings for BACKFILL_ON_START', () => {
+      const truthy = ['1', 'true', 'YES', 'on'];
+      for (const value of truthy) {
+        const config = withTestEnv(
+          {
+            TODOIST_API_TOKEN: 't',
+            ANTHROPIC_API_KEY: 'a',
+            BACKFILL_ON_START: value,
+          },
+          () => loadConfig()
+        );
+        expect(config.backfillOnStart).toBe(true);
+      }
+      const falsy = ['0', 'false', 'NO', 'off'];
+      for (const value of falsy) {
+        const config = withTestEnv(
+          {
+            TODOIST_API_TOKEN: 't',
+            ANTHROPIC_API_KEY: 'a',
+            BACKFILL_ON_START: value,
+          },
+          () => loadConfig()
+        );
+        expect(config.backfillOnStart).toBe(false);
+      }
+    });
+
+    it('should throw on a non-boolean BACKFILL_ON_START value', () => {
+      expect(() =>
+        withTestEnv(
+          {
+            TODOIST_API_TOKEN: 't',
+            ANTHROPIC_API_KEY: 'a',
+            BACKFILL_ON_START: 'maybe',
+          },
+          () => loadConfig()
+        )
+      ).toThrow(/BACKFILL_ON_START must be a boolean/);
     });
 
     it('should use custom values when provided', () => {

@@ -553,6 +553,73 @@ describe('sync.ts - Sync Orchestration', () => {
       });
     });
 
+    describe('reconcile()', () => {
+      it('should pass only unlabelled, incomplete Inbox task IDs to the DB reset', async () => {
+        mockApi.getInboxTasks.mockResolvedValue({
+          success: true,
+          data: [
+            createMockTodoistTask({ id: asTaskId('keep'), labels: [], isCompleted: false }),
+            createMockTodoistTask({ id: asTaskId('labelled'), labels: ['work'], isCompleted: false }),
+            createMockTodoistTask({ id: asTaskId('done'), labels: [], isCompleted: true }),
+          ],
+        });
+        mockDb.resetFailedTasksForRetry.mockReturnValue(0);
+
+        const result = await syncManager.reconcile();
+
+        expect(mockDb.resetFailedTasksForRetry).toHaveBeenCalledTimes(1);
+        const [idsArg, cooldownArg] = mockDb.resetFailedTasksForRetry.mock.calls[0]!;
+        expect(idsArg).toEqual([asTaskId('keep')]);
+        expect(cooldownArg).toBe(config.backfillCooldownMs);
+        expect(result).toEqual({ reset: 0, inboxSize: 3 });
+      });
+
+      it('should short-circuit when there are no eligible Inbox tasks', async () => {
+        mockApi.getInboxTasks.mockResolvedValue({
+          success: true,
+          data: [
+            createMockTodoistTask({ id: asTaskId('labelled'), labels: ['work'], isCompleted: false }),
+          ],
+        });
+
+        const result = await syncManager.reconcile();
+
+        expect(mockDb.resetFailedTasksForRetry).not.toHaveBeenCalled();
+        expect(result).toEqual({ reset: 0, inboxSize: 1 });
+      });
+
+      it('should return zero and log on Inbox fetch failure (never throw)', async () => {
+        mockApi.getInboxTasks.mockResolvedValue({
+          success: false,
+          error: 'todoist 500',
+        });
+
+        const result = await syncManager.reconcile();
+
+        expect(result).toEqual({ reset: 0, inboxSize: 0 });
+        expect(mockDb.resetFailedTasksForRetry).not.toHaveBeenCalled();
+        expect(mockLogger.error).toHaveBeenCalled();
+      });
+
+      it('should report the number of rows the DB actually reset', async () => {
+        mockApi.getInboxTasks.mockResolvedValue({
+          success: true,
+          data: [
+            createMockTodoistTask({ id: asTaskId('a'), labels: [] }),
+            createMockTodoistTask({ id: asTaskId('b'), labels: [] }),
+          ],
+        });
+        mockDb.resetFailedTasksForRetry.mockReturnValue(2);
+
+        const result = await syncManager.reconcile();
+
+        expect(result).toEqual({ reset: 2, inboxSize: 2 });
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          'Reconciliation reset 2 previously-failed task(s) for retry'
+        );
+      });
+    });
+
     describe('retryFailedTasks()', () => {
       it('should retry pending tasks that havent reached max attempts', async () => {
         const pendingTasks: TaskRecord[] = [

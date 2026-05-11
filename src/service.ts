@@ -21,6 +21,7 @@ import { initSyncManager, getSyncManager } from './sync.js';
 // Track if service is shutting down
 let isShuttingDown = false;
 let syncInterval: NodeJS.Timeout | null = null;
+let reconcileInterval: NodeJS.Timeout | null = null;
 
 /**
  * Initialize all service components
@@ -102,12 +103,66 @@ function startSyncLoop(): void {
 }
 
 /**
+ * Run a reconciliation pass that resets previously-failed Inbox tasks so
+ * the regular sync loop will pick them up again. Safe to call any number
+ * of times: per-task retries are rate-limited by `backfillCooldownMs`.
+ */
+async function runReconciliation(reason: 'startup' | 'periodic'): Promise<void> {
+  const logger = getLogger();
+
+  if (isShuttingDown) {
+    logger.debug(`Skipping ${reason} reconciliation - service is shutting down`);
+    return;
+  }
+
+  try {
+    const syncManager = getSyncManager();
+    await syncManager.reconcile();
+  } catch (error) {
+    logger.error(`${reason} reconciliation error`, error);
+    // Don't throw - never let the recovery path take the service down.
+  }
+}
+
+/**
+ * Start the periodic reconciliation timer (separate cadence from the sync
+ * loop, default 24h). A `backfillIntervalMs` of 0 disables it.
+ */
+function startReconciliationLoop(): void {
+  const config = getConfig();
+  const logger = getLogger();
+
+  if (config.backfillIntervalMs <= 0) {
+    logger.debug('Periodic reconciliation disabled (BACKFILL_INTERVAL_MS=0)');
+    return;
+  }
+
+  logger.info(
+    `Starting reconciliation loop (interval: ${config.backfillIntervalMs}ms, cooldown: ${config.backfillCooldownMs}ms)`
+  );
+
+  reconcileInterval = setInterval(() => {
+    runReconciliation('periodic');
+  }, config.backfillIntervalMs);
+}
+
+/**
  * Stop the sync loop
  */
 function stopSyncLoop(): void {
   if (syncInterval) {
     clearInterval(syncInterval);
     syncInterval = null;
+  }
+}
+
+/**
+ * Stop the reconciliation loop
+ */
+function stopReconciliationLoop(): void {
+  if (reconcileInterval) {
+    clearInterval(reconcileInterval);
+    reconcileInterval = null;
   }
 }
 
@@ -125,8 +180,9 @@ async function shutdown(signal: string): Promise<void> {
   isShuttingDown = true;
   logger.info(`Received ${signal}, shutting down gracefully`);
 
-  // Stop the sync loop
+  // Stop both timers
   stopSyncLoop();
+  stopReconciliationLoop();
 
   // Close database
   try {
@@ -350,8 +406,21 @@ async function main(): Promise<void> {
     // Print initial stats
     printStats();
 
+    // If configured, reset previously-failed Inbox tasks before the first
+    // sync cycle so they get re-classified on this boot (default: true).
+    const config = getConfig();
+    if (config.backfillOnStart) {
+      logger.info('Running startup backfill of previously-failed Inbox tasks');
+      await runReconciliation('startup');
+    } else {
+      logger.debug('Startup backfill disabled (BACKFILL_ON_START=false)');
+    }
+
     // Start the main sync loop
     startSyncLoop();
+
+    // Schedule the periodic reconciliation sweep (no-op if interval is 0).
+    startReconciliationLoop();
 
     logger.info('Todoist Autolabel Service is running');
     logger.info('Press Ctrl+C to stop');
