@@ -1,3 +1,8 @@
+---
+layout: default
+title: Setup Guide
+---
+
 # Setup Guide
 
 This guide walks you through standing up the autolabel service on your own machine.

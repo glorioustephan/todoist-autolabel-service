@@ -1,3 +1,8 @@
+---
+layout: default
+title: Deployment Guide
+---
+
 # Deployment Guide
 
 The CLI is just a long-running Node process — pair it with whatever process supervisor you already use. This document walks through three common options.
