@@ -6,7 +6,7 @@ For an overview, see the [README](../README.md).
 
 ## Prerequisites
 
-- **Node.js** ≥ 18.17
+- **Node.js** ≥ 20.18.1 (required by `@doist/todoist-sdk`)
 - A **Todoist** account with API access
 - An **Anthropic** API key (Claude)
 - *(Recommended)* **pnpm** ≥ 10, or **npm** / **yarn** / **bun** — any will work as long as you can run a Node bin.

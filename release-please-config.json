@@ -13,6 +13,5 @@
     }
   },
   "pull-request-title-pattern": "chore: release ${version}",
-  "separate-pull-requests": false,
-  "plugins": ["node-workspace"]
+  "separate-pull-requests": false
 }

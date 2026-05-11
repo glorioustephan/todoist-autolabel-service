@@ -6,7 +6,7 @@ consumption modes healthy.
 
 ## Requirements
 
-- **Node.js** ≥ 18.17
+- **Node.js** ≥ 20.18.1 (required by `@doist/todoist-sdk`)
 - **pnpm** ≥ 10 (`corepack enable && corepack prepare pnpm@latest --activate`)
 - A **Todoist** API token and an **Anthropic** API key if you want to exercise
   the live integration locally
@@ -73,7 +73,7 @@ Before opening a PR:
 5. If you change the public library surface (`src/index.ts`), call it out in
    your PR description; consumers depend on it.
 
-CI runs the same three commands across Node 18, 20, and 22.
+CI runs the same three commands across Node 20 and 22.
 
 ## Release flow
 
