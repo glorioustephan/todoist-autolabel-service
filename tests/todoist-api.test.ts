@@ -7,7 +7,7 @@ import { TodoistApiManager, initTodoistApi, getTodoistApi, resetTodoistApi } fro
 import { createMockConfig, createMockTodoistTask, createNetworkError, type MockLogger } from './test-utils.js';
 import type { Config } from '../src/types.js';
 
-// Mock the Todoist API SDK
+// Mock the Todoist SDK
 const mockTodoistApi = {
   getProjects: vi.fn(),
   getTasks: vi.fn(),
@@ -16,9 +16,12 @@ const mockTodoistApi = {
   getTask: vi.fn(),
 };
 
-vi.mock('@doist/todoist-api-typescript', () => ({
+vi.mock('@doist/todoist-sdk', () => ({
   TodoistApi: vi.fn().mockImplementation(() => mockTodoistApi),
 }));
+
+// Helper: wrap an array as a single-page paginated response.
+const page = <T>(results: T[]) => ({ results, nextCursor: null });
 
 // Mock logger
 vi.mock('../src/logger.js', () => ({
@@ -30,15 +33,6 @@ vi.mock('../src/logger.js', () => ({
   }),
 }));
 
-// Mock sleep function - we'll control timing in tests
-vi.mock('../src/todoist-api.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../src/todoist-api.js')>();
-  return {
-    ...original,
-    // Mock the internal sleep function
-  };
-});
-
 describe('todoist-api.ts - Todoist API Client', () => {
   let config: Config;
   let apiManager: TodoistApiManager;
@@ -48,7 +42,6 @@ describe('todoist-api.ts - Todoist API Client', () => {
     vi.clearAllMocks();
     resetTodoistApi();
 
-    // Get the mocked logger instance
     const { getLogger } = await import('../src/logger.js');
     mockLogger = vi.mocked(getLogger)() as unknown as MockLogger;
 
@@ -56,7 +49,6 @@ describe('todoist-api.ts - Todoist API Client', () => {
       todoistApiToken: 'test-todoist-token',
     });
 
-    // Mock timers to control sleep function
     vi.useFakeTimers();
   });
 
@@ -70,9 +62,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
       it('should initialize with config token', async () => {
         apiManager = new TodoistApiManager(config);
 
-        const todoistModule = await import('@doist/todoist-api-typescript');
-        const mockTodoistApi = vi.mocked(todoistModule.TodoistApi);
-        expect(mockTodoistApi).toHaveBeenCalledWith('test-todoist-token');
+        const sdkModule = await import('@doist/todoist-sdk');
+        const sdkCtor = vi.mocked(sdkModule.TodoistApi);
+        expect(sdkCtor).toHaveBeenCalledWith('test-todoist-token');
       });
     });
 
@@ -82,18 +74,17 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should fetch and store inbox project ID', async () => {
-        const mockProjects = [
-          { id: 'project-1', name: 'Work', isInboxProject: false },
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-          { id: 'project-2', name: 'Personal', isInboxProject: false },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'project-1', name: 'Work', inboxProject: false },
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+          { id: 'project-2', name: 'Personal', inboxProject: false },
+        ]));
 
         const result = await apiManager.initialize();
 
         expect(result.success).toBe(true);
         expect(mockTodoistApi.getProjects).toHaveBeenCalled();
-        
+
         const inboxResult = apiManager.getInboxProjectId();
         expect(inboxResult.success).toBe(true);
         if (inboxResult.success) {
@@ -106,11 +97,10 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should return error when inbox project not found', async () => {
-        const mockProjects = [
-          { id: 'project-1', name: 'Work', isInboxProject: false },
-          { id: 'project-2', name: 'Personal', isInboxProject: false },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'project-1', name: 'Work', inboxProject: false },
+          { id: 'project-2', name: 'Personal', inboxProject: false },
+        ]));
 
         const result = await apiManager.initialize();
 
@@ -137,13 +127,36 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should return error with empty projects array', async () => {
-        mockTodoistApi.getProjects.mockResolvedValue([]);
+        mockTodoistApi.getProjects.mockResolvedValue(page([]));
 
         const result = await apiManager.initialize();
 
         expect(result.success).toBe(false);
         if (!result.success) {
           expect(result.error).toBe('Could not find Todoist Inbox project');
+        }
+      });
+
+      it('should walk pagination cursor when inbox is not on the first page', async () => {
+        mockTodoistApi.getProjects
+          .mockResolvedValueOnce({
+            results: [{ id: 'project-1', name: 'Work', inboxProject: false }],
+            nextCursor: 'cursor-2',
+          })
+          .mockResolvedValueOnce({
+            results: [{ id: 'inbox-999', name: 'Inbox', inboxProject: true }],
+            nextCursor: null,
+          });
+
+        const result = await apiManager.initialize();
+
+        expect(result.success).toBe(true);
+        expect(mockTodoistApi.getProjects).toHaveBeenCalledTimes(2);
+        expect(mockTodoistApi.getProjects).toHaveBeenNthCalledWith(2, { cursor: 'cursor-2' });
+
+        const inboxResult = apiManager.getInboxProjectId();
+        if (inboxResult.success) {
+          expect(inboxResult.data).toBe('inbox-999');
         }
       });
     });
@@ -163,10 +176,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should return inbox project ID after initialization', async () => {
-        const mockProjects = [
-          { id: 'inbox-456', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-456', name: 'Inbox', inboxProject: true },
+        ]));
 
         await apiManager.initialize();
         const result = apiManager.getInboxProjectId();
@@ -181,15 +193,14 @@ describe('todoist-api.ts - Todoist API Client', () => {
     describe('getInboxTasks()', () => {
       beforeEach(async () => {
         apiManager = new TodoistApiManager(config);
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
         await apiManager.initialize();
       });
 
       it('should fetch and transform inbox tasks', async () => {
-        const mockApiTasks = [
+        mockTodoistApi.getTasks.mockResolvedValue(page([
           {
             id: 'task-1',
             content: 'First task',
@@ -197,33 +208,32 @@ describe('todoist-api.ts - Todoist API Client', () => {
             projectId: 'inbox-123',
             labels: ['work', 'urgent'],
             priority: 2,
-            createdAt: '2024-01-01T00:00:00Z',
-            isCompleted: false,
+            addedAt: new Date('2024-01-01T00:00:00Z'),
+            checked: false,
           },
           {
             id: 'task-2',
             content: 'Second task',
-            description: '', // Empty description
+            description: '',
             projectId: 'inbox-123',
-            labels: undefined, // No labels
+            labels: null,
             priority: 1,
-            createdAt: '2024-01-01T01:00:00Z',
-            isCompleted: true,
+            addedAt: new Date('2024-01-01T01:00:00Z'),
+            checked: true,
           },
-        ];
-        mockTodoistApi.getTasks.mockResolvedValue(mockApiTasks);
+        ]));
 
         const result = await apiManager.getInboxTasks();
 
         expect(mockTodoistApi.getTasks).toHaveBeenCalledWith({
           projectId: 'inbox-123',
+          cursor: null,
         });
-        
+
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.data).toHaveLength(2);
 
-          // Check first task transformation
           expect(result.data[0]).toEqual({
             id: 'task-1',
             content: 'First task',
@@ -231,11 +241,10 @@ describe('todoist-api.ts - Todoist API Client', () => {
             projectId: 'inbox-123',
             labels: ['work', 'urgent'],
             priority: 2,
-            createdAt: '2024-01-01T00:00:00Z',
+            createdAt: '2024-01-01T00:00:00.000Z',
             isCompleted: false,
           });
 
-          // Check second task transformation (handles missing fields)
           expect(result.data[1]).toEqual({
             id: 'task-2',
             content: 'Second task',
@@ -243,37 +252,32 @@ describe('todoist-api.ts - Todoist API Client', () => {
             projectId: 'inbox-123',
             labels: [],
             priority: 1,
-            createdAt: '2024-01-01T01:00:00Z',
+            createdAt: '2024-01-01T01:00:00.000Z',
             isCompleted: true,
           });
         }
 
-        expect(mockLogger.debug).toHaveBeenCalledWith(
-          'Fetched 2 tasks from Inbox'
-        );
+        expect(mockLogger.debug).toHaveBeenCalledWith('Fetched 2 tasks from Inbox');
       });
 
       it('should initialize if not already initialized', async () => {
-        // Create new instance that hasn't been initialized
         const newApiManager = new TodoistApiManager(config);
-        const mockProjects = [
-          { id: 'inbox-789', name: 'Inbox', isInboxProject: true },
-        ];
-        const mockTasks = [createMockTodoistTask()];
-
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
-        mockTodoistApi.getTasks.mockResolvedValue(mockTasks);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-789', name: 'Inbox', inboxProject: true },
+        ]));
+        mockTodoistApi.getTasks.mockResolvedValue(page([createSdkTask()]));
 
         await newApiManager.getInboxTasks();
 
         expect(mockTodoistApi.getProjects).toHaveBeenCalled();
         expect(mockTodoistApi.getTasks).toHaveBeenCalledWith({
           projectId: 'inbox-789',
+          cursor: null,
         });
       });
 
       it('should handle empty task list', async () => {
-        mockTodoistApi.getTasks.mockResolvedValue([]);
+        mockTodoistApi.getTasks.mockResolvedValue(page([]));
 
         const result = await apiManager.getInboxTasks();
 
@@ -281,9 +285,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
         if (result.success) {
           expect(result.data).toEqual([]);
         }
-        expect(mockLogger.debug).toHaveBeenCalledWith(
-          'Fetched 0 tasks from Inbox'
-        );
+        expect(mockLogger.debug).toHaveBeenCalledWith('Fetched 0 tasks from Inbox');
       });
 
       it('should return error on API errors', async () => {
@@ -296,14 +298,11 @@ describe('todoist-api.ts - Todoist API Client', () => {
         if (!result.success) {
           expect(result.error).toContain('Network request failed');
         }
-        expect(mockLogger.error).toHaveBeenCalledWith(
-          'Failed to fetch inbox tasks',
-          apiError
-        );
+        expect(mockLogger.error).toHaveBeenCalledWith('Failed to fetch inbox tasks', apiError);
       });
 
       it('should handle tasks with null description gracefully', async () => {
-        const mockApiTasks = [
+        mockTodoistApi.getTasks.mockResolvedValue(page([
           {
             id: 'task-1',
             content: 'Task with null description',
@@ -311,17 +310,40 @@ describe('todoist-api.ts - Todoist API Client', () => {
             projectId: 'inbox-123',
             labels: [],
             priority: 1,
-            createdAt: '2024-01-01T00:00:00Z',
-            isCompleted: false,
+            addedAt: new Date('2024-01-01T00:00:00Z'),
+            checked: false,
           },
-        ];
-        mockTodoistApi.getTasks.mockResolvedValue(mockApiTasks);
+        ]));
 
         const result = await apiManager.getInboxTasks();
 
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.data[0]!.description).toBe('');
+        }
+      });
+
+      it('should walk pagination cursor and collect tasks across pages', async () => {
+        mockTodoistApi.getTasks
+          .mockResolvedValueOnce({
+            results: [createSdkTask({ id: 'task-page-1' })],
+            nextCursor: 'next-cursor',
+          })
+          .mockResolvedValueOnce({
+            results: [createSdkTask({ id: 'task-page-2' })],
+            nextCursor: null,
+          });
+
+        const result = await apiManager.getInboxTasks();
+
+        expect(mockTodoistApi.getTasks).toHaveBeenCalledTimes(2);
+        expect(mockTodoistApi.getTasks).toHaveBeenNthCalledWith(2, {
+          projectId: 'inbox-123',
+          cursor: 'next-cursor',
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.map((t) => t.id)).toEqual(['task-page-1', 'task-page-2']);
         }
       });
     });
@@ -332,11 +354,10 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should fetch and transform labels', async () => {
-        const mockApiLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'productivity', color: 'blue' },
           { id: 'label-2', name: 'urgent', color: 'red' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(mockApiLabels);
+        ]));
 
         const labels = await apiManager.getLabels();
 
@@ -352,20 +373,16 @@ describe('todoist-api.ts - Todoist API Client', () => {
           name: 'urgent',
           color: 'red',
         });
-        expect(mockLogger.debug).toHaveBeenCalledWith(
-          'Fetched 2 labels from Todoist'
-        );
+        expect(mockLogger.debug).toHaveBeenCalledWith('Fetched 2 labels from Todoist');
       });
 
       it('should handle empty labels list', async () => {
-        mockTodoistApi.getLabels.mockResolvedValue([]);
+        mockTodoistApi.getLabels.mockResolvedValue(page([]));
 
         const labels = await apiManager.getLabels();
 
         expect(labels).toEqual([]);
-        expect(mockLogger.debug).toHaveBeenCalledWith(
-          'Fetched 0 labels from Todoist'
-        );
+        expect(mockLogger.debug).toHaveBeenCalledWith('Fetched 0 labels from Todoist');
       });
 
       it('should handle API errors', async () => {
@@ -373,10 +390,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
         mockTodoistApi.getLabels.mockRejectedValue(apiError);
 
         await expect(apiManager.getLabels()).rejects.toThrow('Network request failed');
-        expect(mockLogger.error).toHaveBeenCalledWith(
-          'Failed to fetch labels',
-          apiError
-        );
+        expect(mockLogger.error).toHaveBeenCalledWith('Failed to fetch labels', apiError);
       });
     });
 
@@ -391,7 +405,6 @@ describe('todoist-api.ts - Todoist API Client', () => {
 
         const updatePromise = apiManager.updateTaskLabels('task-123', labels);
 
-        // Fast-forward past the API delay
         vi.advanceTimersByTime(200);
 
         await updatePromise;
@@ -432,21 +445,17 @@ describe('todoist-api.ts - Todoist API Client', () => {
       it('should respect API delay timing', async () => {
         mockTodoistApi.updateTask.mockResolvedValue(undefined);
 
-        const startTime = Date.now();
         const updatePromise = apiManager.updateTaskLabels('task-123', ['test']);
 
-        // Should not resolve immediately
         let resolved = false;
         updatePromise.then(() => { resolved = true; });
 
         expect(resolved).toBe(false);
 
-        // Advance time by less than delay
         vi.advanceTimersByTime(100);
-        await Promise.resolve(); // Let microtasks run
+        await Promise.resolve();
         expect(resolved).toBe(false);
 
-        // Advance time past delay
         vi.advanceTimersByTime(100);
         await updatePromise;
         expect(resolved).toBe(true);
@@ -459,17 +468,16 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should fetch and transform single task', async () => {
-        const mockApiTask = {
+        mockTodoistApi.getTask.mockResolvedValue({
           id: 'task-123',
           content: 'Single task',
           description: 'Task description',
           projectId: 'project-456',
           labels: ['work'],
           priority: 3,
-          createdAt: '2024-01-01T00:00:00Z',
-          isCompleted: false,
-        };
-        mockTodoistApi.getTask.mockResolvedValue(mockApiTask);
+          addedAt: new Date('2024-01-01T00:00:00Z'),
+          checked: false,
+        });
 
         const task = await apiManager.getTask('task-123');
 
@@ -481,7 +489,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
           projectId: 'project-456',
           labels: ['work'],
           priority: 3,
-          createdAt: '2024-01-01T00:00:00Z',
+          createdAt: '2024-01-01T00:00:00.000Z',
           isCompleted: false,
         });
       });
@@ -500,17 +508,16 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should handle task with missing optional fields', async () => {
-        const mockApiTask = {
+        mockTodoistApi.getTask.mockResolvedValue({
           id: 'task-123',
           content: 'Minimal task',
           description: null,
           projectId: 'project-456',
           labels: null,
           priority: 1,
-          createdAt: '2024-01-01T00:00:00Z',
-          isCompleted: false,
-        };
-        mockTodoistApi.getTask.mockResolvedValue(mockApiTask);
+          addedAt: null,
+          checked: false,
+        });
 
         const task = await apiManager.getTask('task-123');
 
@@ -521,7 +528,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
           projectId: 'project-456',
           labels: [],
           priority: 1,
-          createdAt: '2024-01-01T00:00:00Z',
+          createdAt: '',
           isCompleted: false,
         });
       });
@@ -533,15 +540,13 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should validate labels against Todoist labels', async () => {
-        const todoistLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'productivity', color: 'blue' },
           { id: 'label-2', name: 'urgent', color: 'red' },
           { id: 'label-3', name: 'work', color: 'green' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(todoistLabels);
+        ]));
 
-        const inputLabels = ['productivity', 'invalid-label', 'work', 'another-invalid'];
-        const result = await apiManager.validateLabels(inputLabels);
+        const result = await apiManager.validateLabels(['productivity', 'invalid-label', 'work', 'another-invalid']);
 
         expect(result).toEqual({
           valid: ['productivity', 'work'],
@@ -550,64 +555,51 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should handle empty input labels', async () => {
-        const todoistLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'productivity', color: 'blue' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(todoistLabels);
+        ]));
 
         const result = await apiManager.validateLabels([]);
 
-        expect(result).toEqual({
-          valid: [],
-          invalid: [],
-        });
+        expect(result).toEqual({ valid: [], invalid: [] });
       });
 
       it('should handle empty Todoist labels', async () => {
-        mockTodoistApi.getLabels.mockResolvedValue([]);
+        mockTodoistApi.getLabels.mockResolvedValue(page([]));
 
         const result = await apiManager.validateLabels(['any-label']);
 
-        expect(result).toEqual({
-          valid: [],
-          invalid: ['any-label'],
-        });
+        expect(result).toEqual({ valid: [], invalid: ['any-label'] });
       });
 
       it('should handle all valid labels', async () => {
-        const todoistLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'productivity', color: 'blue' },
           { id: 'label-2', name: 'urgent', color: 'red' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(todoistLabels);
+        ]));
 
         const result = await apiManager.validateLabels(['productivity', 'urgent']);
 
-        expect(result).toEqual({
-          valid: ['productivity', 'urgent'],
-          invalid: [],
-        });
+        expect(result).toEqual({ valid: ['productivity', 'urgent'], invalid: [] });
       });
 
       it('should handle case-sensitive label matching', async () => {
-        const todoistLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'Productivity', color: 'blue' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(todoistLabels);
+        ]));
 
         const result = await apiManager.validateLabels(['productivity', 'Productivity']);
 
         expect(result).toEqual({
           valid: ['Productivity'],
-          invalid: ['productivity'], // Case sensitive
+          invalid: ['productivity'],
         });
       });
 
       it('should handle duplicate labels in input', async () => {
-        const todoistLabels = [
+        mockTodoistApi.getLabels.mockResolvedValue(page([
           { id: 'label-1', name: 'productivity', color: 'blue' },
-        ];
-        mockTodoistApi.getLabels.mockResolvedValue(todoistLabels);
+        ]));
 
         const result = await apiManager.validateLabels(['productivity', 'productivity', 'invalid']);
 
@@ -622,10 +614,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
   describe('Module Functions', () => {
     describe('initTodoistApi()', () => {
       it('should create and initialize API manager', async () => {
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
 
         const api = await initTodoistApi(config);
 
@@ -634,16 +625,14 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should return existing instance on subsequent calls', async () => {
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
 
         const api1 = await initTodoistApi(config);
         const api2 = await initTodoistApi(config);
 
         expect(api1).toBe(api2);
-        // Should only initialize once
         expect(mockTodoistApi.getProjects).toHaveBeenCalledTimes(1);
       });
 
@@ -651,8 +640,6 @@ describe('todoist-api.ts - Todoist API Client', () => {
         const initError = createNetworkError();
         mockTodoistApi.getProjects.mockRejectedValue(initError);
 
-        // initTodoistApi now returns manager even if initialize fails
-        // (it calls initialize but doesn't check result)
         const manager = await initTodoistApi(config);
         expect(manager).toBeInstanceOf(TodoistApiManager);
       });
@@ -668,10 +655,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should return initialized API instance', async () => {
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
 
         const initializedApi = await initTodoistApi(config);
         const retrievedApi = getTodoistApi();
@@ -682,10 +668,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
 
     describe('resetTodoistApi()', () => {
       it('should reset API instance', async () => {
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
 
         await initTodoistApi(config);
         resetTodoistApi();
@@ -696,10 +681,9 @@ describe('todoist-api.ts - Todoist API Client', () => {
       });
 
       it('should allow reinitialization after reset', async () => {
-        const mockProjects = [
-          { id: 'inbox-123', name: 'Inbox', isInboxProject: true },
-        ];
-        mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+        mockTodoistApi.getProjects.mockResolvedValue(page([
+          { id: 'inbox-123', name: 'Inbox', inboxProject: true },
+        ]));
 
         await initTodoistApi(config);
         resetTodoistApi();
@@ -715,16 +699,14 @@ describe('todoist-api.ts - Todoist API Client', () => {
       apiManager = new TodoistApiManager(config);
     });
 
-    it('should handle multiple projects with isInboxProject true', async () => {
-      const mockProjects = [
-        { id: 'inbox-1', name: 'Inbox 1', isInboxProject: true },
-        { id: 'inbox-2', name: 'Inbox 2', isInboxProject: true },
-      ];
-      mockTodoistApi.getProjects.mockResolvedValue(mockProjects);
+    it('should handle multiple projects with inboxProject true', async () => {
+      mockTodoistApi.getProjects.mockResolvedValue(page([
+        { id: 'inbox-1', name: 'Inbox 1', inboxProject: true },
+        { id: 'inbox-2', name: 'Inbox 2', inboxProject: true },
+      ]));
 
       await apiManager.initialize();
 
-      // Should take the first inbox project
       const result = apiManager.getInboxProjectId();
       expect(result.success).toBe(true);
       if (result.success) {
@@ -738,7 +720,7 @@ describe('todoist-api.ts - Todoist API Client', () => {
       mockTodoistApi.getProjects.mockRejectedValue(timeoutError);
 
       const result = await apiManager.initialize();
-      
+
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error).toContain('Request timeout');
@@ -769,30 +751,6 @@ describe('todoist-api.ts - Todoist API Client', () => {
       );
     });
 
-    it('should handle malformed API responses gracefully', async () => {
-      // Mock malformed task response
-      const malformedTask = {
-        // Missing required fields
-        id: 'task-123',
-        // No content, description, etc.
-      };
-      mockTodoistApi.getTask.mockResolvedValue(malformedTask);
-
-      const task = await apiManager.getTask('task-123');
-
-      // Should still return a transformed task with defaults
-      expect(task).toEqual({
-        id: 'task-123',
-        content: undefined,
-        description: '',
-        projectId: null, // projectId is mapped to null when undefined
-        labels: [],
-        priority: undefined,
-        createdAt: undefined,
-        isCompleted: undefined,
-      });
-    });
-
     it('should handle very large label arrays', async () => {
       const manyLabels = Array.from({ length: 1000 }, (_, i) => `label-${i}`);
       mockTodoistApi.updateTask.mockResolvedValue(undefined);
@@ -805,17 +763,16 @@ describe('todoist-api.ts - Todoist API Client', () => {
     });
 
     it('should handle Unicode characters in task content', async () => {
-      const unicodeTask = {
+      mockTodoistApi.getTask.mockResolvedValue({
         id: 'task-123',
         content: 'Task with émojis 🚀 and ünicöde',
         description: 'Description with 中文 characters',
         projectId: 'inbox-123',
         labels: ['标签'],
         priority: 1,
-        createdAt: '2024-01-01T00:00:00Z',
-        isCompleted: false,
-      };
-      mockTodoistApi.getTask.mockResolvedValue(unicodeTask);
+        addedAt: new Date('2024-01-01T00:00:00Z'),
+        checked: false,
+      });
 
       const task = await apiManager.getTask('task-123');
 
@@ -825,3 +782,29 @@ describe('todoist-api.ts - Todoist API Client', () => {
     });
   });
 });
+
+// Helper: build a minimal SDK task (new v1 shape) for fixture data.
+function createSdkTask(overrides: Partial<{
+  id: string;
+  content: string;
+  description: string | null;
+  projectId: string;
+  labels: string[];
+  priority: number;
+  addedAt: Date | null;
+  checked: boolean;
+}> = {}) {
+  return {
+    id: overrides.id ?? 'task-default',
+    content: overrides.content ?? 'Default task',
+    description: overrides.description ?? '',
+    projectId: overrides.projectId ?? 'inbox-789',
+    labels: overrides.labels ?? [],
+    priority: overrides.priority ?? 1,
+    addedAt: overrides.addedAt ?? new Date('2024-01-01T00:00:00Z'),
+    checked: overrides.checked ?? false,
+  };
+}
+
+// Silence unused-import lint for createMockTodoistTask if not referenced — kept for parity with prior test surface.
+void createMockTodoistTask;

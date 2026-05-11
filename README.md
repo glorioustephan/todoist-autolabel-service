@@ -74,7 +74,7 @@ graph TB
 
 ## How It Works
 
-1. **Poll**: Every 15 seconds, syncs with Todoist using incremental sync
+1. **Poll**: Every interval period, syncs with Todoist using incremental sync
 2. **Filter**: Only processes new/changed tasks in the Inbox
 3. **Classify**: Sends task to Claude API with your label taxonomy using Structured Outputs
 4. **Apply**: Updates task labels in Todoist
@@ -108,7 +108,7 @@ Environment variables (`.env`):
 |----------|---------|-------------|
 | `TODOIST_API_TOKEN` | Required | Todoist API token |
 | `ANTHROPIC_API_KEY` | Required | Claude API key |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-5-20250929` | Claude model to use |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | Claude model to use |
 | `MAX_LABELS_PER_TASK` | `5` | Max labels per task |
 | `POLL_INTERVAL_MS` | `15000` | Polling interval |
 | `MAX_ERROR_LOGS` | `1000` | Max error log entries |
@@ -119,10 +119,11 @@ Environment variables (`.env`):
 
 | Model | Speed | Cost | Best For |
 |-------|-------|------|----------|
-| `claude-sonnet-4-5-20250929` | Fast | ~$3/1M tokens | Recommended default |
+| `claude-haiku-4-5-20251001` | Fastest | ~$1/$5 per 1M in/out | Recommended default |
+| `claude-sonnet-4-5-20250929` | Fast | ~$3/1M tokens | Higher-accuracy classification |
 | `claude-opus-4-20250514` | Slower | ~$15/1M tokens | Complex taxonomies |
 
-> **Note**: Structured Outputs requires Claude Sonnet 4.5 or Claude Opus 4. Other models are not supported.
+> **Note**: Structured Outputs requires Claude Haiku 4.5, Sonnet 4.5, or Opus 4 (or newer). Earlier models are not supported.
 
 ## Labels
 
