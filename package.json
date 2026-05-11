@@ -59,7 +59,13 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "validate-env": "tsx src/validate-env.ts",
     "commit": "cz",
-    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+    "prepare": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build",
+    "pm2:start": "pnpm run validate-env && pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop todoist-autolabel",
+    "pm2:restart": "pm2 restart todoist-autolabel",
+    "pm2:logs": "pm2 logs todoist-autolabel",
+    "pm2:status": "pm2 status"
   },
   "config": {
     "commitizen": {
