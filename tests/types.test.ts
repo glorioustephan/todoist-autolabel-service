@@ -45,6 +45,9 @@ describe('types.ts - Type Definitions', () => {
         maxErrorLogs: 1000,
         dbPath: '/path/to/db',
         logLevel: 'info',
+        backfillOnStart: true,
+        backfillIntervalMs: 86_400_000,
+        backfillCooldownMs: 3_600_000,
         labelsPath: '/path/to/labels.json',
       };
 
@@ -427,6 +430,9 @@ describe('types.ts - Type Definitions', () => {
           maxErrorLogs: 1000,
           dbPath: '/path/to/db',
           logLevel: 'info' as LogLevel,
+          backfillOnStart: true,
+          backfillIntervalMs: 86_400_000,
+          backfillCooldownMs: 3_600_000,
           labelsPath: '/path/to/labels.json',
         } as Config,
 

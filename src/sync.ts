@@ -16,9 +16,10 @@ const MAX_ATTEMPTS = 3;
  */
 export class SyncManager {
   private isRunning: boolean = false;
+  private readonly config: Config;
 
-  constructor(_config: Config) {
-    // Config stored for potential future use
+  constructor(config: Config) {
+    this.config = config;
   }
 
   /**
@@ -134,6 +135,55 @@ export class SyncManager {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Reconcile DB state with the live Inbox.
+   *
+   * Looks at every Inbox task that is currently unlabelled and incomplete,
+   * and resets any DB record that is in a terminal-retry state
+   * (`status='failed'` or `attempts >= MAX_ATTEMPTS`) so the regular sync
+   * cycle will pick it up again. Resets are gated by `backfillCooldownMs`
+   * so a genuinely-unclassifiable task settles into a slow retry cadence
+   * instead of consuming classifier calls on every tick.
+   *
+   * Returns the number of DB rows actually reset.
+   */
+  async reconcile(): Promise<{ reset: number; inboxSize: number }> {
+    const logger = getLogger();
+    const db = getDatabase();
+    const api = getTodoistApi();
+
+    logger.debug('Starting reconciliation pass');
+
+    const tasksResult = await api.getInboxTasks();
+    if (!tasksResult.success) {
+      logger.error(
+        'Reconciliation aborted: could not fetch Inbox',
+        new Error(tasksResult.error)
+      );
+      return { reset: 0, inboxSize: 0 };
+    }
+
+    const inboxTasks = tasksResult.data;
+    const eligibleIds = inboxTasks
+      .filter((t) => !t.isCompleted && (!t.labels || t.labels.length === 0))
+      .map((t) => t.id);
+
+    if (eligibleIds.length === 0) {
+      logger.debug('Reconciliation: no eligible Inbox tasks');
+      return { reset: 0, inboxSize: inboxTasks.length };
+    }
+
+    const reset = db.resetFailedTasksForRetry(eligibleIds, this.config.backfillCooldownMs);
+
+    if (reset > 0) {
+      logger.info(`Reconciliation reset ${reset} previously-failed task(s) for retry`);
+    } else {
+      logger.debug('Reconciliation: nothing to reset');
+    }
+
+    return { reset, inboxSize: inboxTasks.length };
   }
 
   /**

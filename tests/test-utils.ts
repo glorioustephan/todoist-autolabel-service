@@ -33,6 +33,9 @@ export function createMockConfig(overrides: Partial<Config> = {}): Config {
     maxErrorLogs: 1000,
     dbPath: ':memory:', // Use in-memory SQLite for tests
     logLevel: 'error', // Reduce test noise
+    backfillOnStart: true,
+    backfillIntervalMs: 86_400_000,
+    backfillCooldownMs: 3_600_000,
     labelsPath: path.join(process.cwd(), 'test-labels.json'),
     ...overrides,
   };
@@ -183,6 +186,7 @@ export interface MockDatabase {
   getTask: ReturnType<typeof vi.fn>;
   getTasksByStatus: ReturnType<typeof vi.fn>;
   getPendingRetryableTasks: ReturnType<typeof vi.fn>;
+  resetFailedTasksForRetry: ReturnType<typeof vi.fn>;
   upsertTask: ReturnType<typeof vi.fn>;
   markTaskClassified: ReturnType<typeof vi.fn>;
   markTaskAttempted: ReturnType<typeof vi.fn>;
@@ -236,6 +240,7 @@ export function createMockDatabase(): MockDatabase {
     getTask: vi.fn(),
     getTasksByStatus: vi.fn().mockReturnValue([]),
     getPendingRetryableTasks: vi.fn().mockReturnValue([]),
+    resetFailedTasksForRetry: vi.fn().mockReturnValue(0),
     upsertTask: vi.fn(),
     markTaskClassified: vi.fn(),
     markTaskAttempted: vi.fn(),

@@ -173,6 +173,9 @@ All configuration is environment-driven. The CLI looks for a `.env` file in the 
 | `DB_PATH`             | `<cwd>/data/todoist.db`                    | SQLite database location                                   |
 | `LABELS_PATH`         | `<cwd>/labels.json`                        | Path to your label taxonomy                                |
 | `LOG_LEVEL`           | `info`                                     | `debug` &#124; `info` &#124; `warn` &#124; `error`         |
+| `BACKFILL_ON_START`   | `true`                                     | On boot, retry every still-unlabelled Inbox task that previously failed |
+| `BACKFILL_INTERVAL_MS`| `86400000` (24h)                           | Periodic sweep cadence for the same retry. `0` disables.   |
+| `BACKFILL_COOLDOWN_MS`| `3600000` (1h)                             | Minimum gap between successive retries of the same task    |
 
 ### Supported Claude models
 
@@ -193,6 +196,17 @@ Structured Outputs is supported on **Claude Haiku 4.5+, Sonnet 4.5+, and Opus 4+
 5. **Track** — Record the attempt in SQLite (success, retry, or permanent fail after 3 tries).
 
 The classifier uses Claude's Structured Outputs beta header, so JSON parsing is guaranteed — no schema-violation retries needed.
+
+### Retries and backfill
+
+After 3 failed classification attempts a task is marked `failed` in the local DB and the regular sync loop stops re-trying it — otherwise a malformed or temporarily-broken task would burn classifier calls forever. Two safety valves bring those tasks back without manual intervention:
+
+- **On boot (`BACKFILL_ON_START=true`, default)** — Every previously-failed task that's still sitting unlabelled in the Inbox is reset to `pending`, so the very next sync cycle gives it another chance. If the API was down for a week, the next service restart will catch your week-old tasks up.
+- **On a slow periodic sweep (`BACKFILL_INTERVAL_MS=86400000`, default 24h)** — Same reset, run again on a separate timer while the service is running.
+
+`BACKFILL_COOLDOWN_MS` (default 1h) caps how often a single task can be retried — a genuinely-unclassifiable task settles into ~1 attempt per cooldown interval rather than spinning. To opt out of the periodic sweep entirely set `BACKFILL_INTERVAL_MS=0`; to opt out of startup backfill set `BACKFILL_ON_START=false`.
+
+If a task is truly unclassifiable and you want to stop attempts, the pragmatic move is to either delete it from Todoist or label it manually — both make the sync loop skip it on the next pass.
 
 ## Project layout (for embedders)
 

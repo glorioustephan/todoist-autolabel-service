@@ -141,6 +141,20 @@ Stop it with `Ctrl+C`. The shutdown handler closes the DB cleanly.
 | `DB_PATH`             | no       | `<cwd>/data/todoist.db`                  | SQLite DB location                                       |
 | `LABELS_PATH`         | no       | `<cwd>/labels.json`                      | Override the labels file location                        |
 | `LOG_LEVEL`           | no       | `info`                                   | `debug` &#124; `info` &#124; `warn` &#124; `error`       |
+| `BACKFILL_ON_START`   | no       | `true`                                   | Retry every still-unlabelled Inbox task on each service boot |
+| `BACKFILL_INTERVAL_MS`| no       | `86400000` (24h)                         | Periodic retry sweep cadence. `0` disables.              |
+| `BACKFILL_COOLDOWN_MS`| no       | `3600000` (1h)                           | Per-task floor between successive retries                |
+
+### Backfill and retry sweep
+
+A task that fails 3 classification attempts is marked `failed` in the local DB and the regular sync loop stops re-trying it, so a temporarily-broken API or a malformed task doesn't burn classifier calls forever. Two safety valves bring those tasks back without manual intervention:
+
+- **On boot** — when `BACKFILL_ON_START=true` (the default), every previously-failed task that's still sitting unlabelled in your Inbox gets reset to `pending`. The next sync cycle re-tries it. This is what fixes you up after a service outage: restart, and your old Inbox tasks get re-classified.
+- **On a slow periodic sweep** — when `BACKFILL_INTERVAL_MS > 0` (default `86400000` = 24h), the same reset runs on a separate timer while the service is alive.
+
+Both knobs use `BACKFILL_COOLDOWN_MS` (default `3600000` = 1h) as a per-task floor: a task that was just attempted won't be reset, so a genuinely-unclassifiable task settles into ~1 attempt per cooldown interval rather than spinning.
+
+To stop attempts on a perma-failing task: delete it from Todoist, or label it manually. Both make the sync loop skip it on every future pass.
 
 ## Supported Claude models
 
