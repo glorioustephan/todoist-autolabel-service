@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/glorioustephan/todoist-autolabel-service/actions/workflows/ci.yml/badge.svg)](https://github.com/glorioustephan/todoist-autolabel-service/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@glorioustephan/todoist-autolabel.svg)](https://www.npmjs.com/package/@glorioustephan/todoist-autolabel)
+[![Docs](https://img.shields.io/badge/docs-online-DC4C3E.svg)](https://glorioustephan.github.io/todoist-autolabel-service/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-DC4C3E.svg)](./LICENSE)
+
+📖 **Full documentation:** <https://glorioustephan.github.io/todoist-autolabel-service/>
 
 > Automatically classify and label Todoist Inbox tasks with Claude AI using **Structured Outputs** — guaranteed-valid label assignments, no retry parsing, no malformed JSON.
 

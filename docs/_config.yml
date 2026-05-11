@@ -1,0 +1,21 @@
+title: "@glorioustephan/todoist-autolabel"
+description: "Auto-classify Todoist Inbox tasks with Claude AI using Structured Outputs."
+theme: jekyll-theme-cayman
+markdown: kramdown
+kramdown:
+  syntax_highlighter: rouge
+  input: GFM
+
+# Rewrite relative `*.md` links to `*.html` so cross-doc links work on the
+# hosted site without us having to hard-code .html extensions.
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true
+
+# Keep things tidy in the built site
+exclude:
+  - vendor
+  - Gemfile
+  - Gemfile.lock
