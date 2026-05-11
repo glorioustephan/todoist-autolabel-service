@@ -1,332 +1,158 @@
 # Deployment Guide
 
-This guide covers deploying and managing the Todoist Autolabel Service on your Mac Mini using PM2.
+The CLI is just a long-running Node process — pair it with whatever process supervisor you already use. This document walks through three common options.
 
-## Prerequisites
+For the initial setup (`.env`, `labels.json`, tokens), see [`setup.md`](./setup.md).
 
-Complete the [setup guide](./setup.md) first.
+## Option 1 — PM2
 
-## PM2 Overview
-
-PM2 is a production process manager for Node.js that provides:
-- Automatic restarts on crash
-- Log management
-- Startup script generation
-- Resource monitoring
-
-## Starting the Service
-
-### Build First
-
-Always build before deploying:
+The repository ships an `ecosystem.config.cjs` you can copy as a starting point. **It is not part of the npm package**; check it out of the repo or copy it from GitHub.
 
 ```bash
-pnpm run build
+# In the directory that holds your .env and labels.json:
+pnpm add -g pm2
+pnpm add @glorioustephan/todoist-autolabel
+curl -O https://raw.githubusercontent.com/glorioustephan/todoist-autolabel-service/main/ecosystem.config.cjs
+pm2 start ecosystem.config.cjs
 ```
 
-### Start with PM2
+You may need to edit the `script` path in `ecosystem.config.cjs` to point at:
+
+```
+./node_modules/@glorioustephan/todoist-autolabel/dist/service.js
+```
+
+Useful commands:
 
 ```bash
-pnpm run pm2:start
+pm2 status              # is it running?
+pm2 logs todoist-autolabel
+pm2 restart todoist-autolabel
+pm2 stop todoist-autolabel
+pm2 startup             # generate a system-init hook
+pm2 save                # persist the current process list across reboots
 ```
 
-This starts the service using the configuration in `ecosystem.config.cjs`.
+## Option 2 — systemd (Linux)
 
-### Verify It's Running
+Create `/etc/systemd/system/todoist-autolabel.service`:
+
+```ini
+[Unit]
+Description=Todoist Autolabel Service
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/todoist-autolabel
+EnvironmentFile=/srv/todoist-autolabel/.env
+ExecStart=/usr/bin/npx @glorioustephan/todoist-autolabel
+Restart=on-failure
+RestartSec=10s
+User=todoist
+Group=todoist
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
 
 ```bash
-pnpm run pm2:status
+sudo systemctl daemon-reload
+sudo systemctl enable --now todoist-autolabel
+journalctl -fu todoist-autolabel
 ```
 
-You should see output like:
-```
-┌─────┬───────────────────┬─────────────┬─────────┬─────────┬──────────┐
-│ id  │ name              │ namespace   │ version │ mode    │ pid      │
-├─────┼───────────────────┼─────────────┼─────────┼─────────┼──────────┤
-│ 0   │ todoist-autolabel │ default     │ 1.0.0   │ fork    │ 12345    │
-└─────┴───────────────────┴─────────────┴─────────┴─────────┴──────────┘
-```
+`WorkingDirectory` must contain your `labels.json` (and a `data/` directory if you're using the default DB path).
 
-## Viewing Logs
+## Option 3 — Docker
 
-### Real-time Logs
+A minimal `Dockerfile`:
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+RUN apk add --no-cache python3 make g++ \
+    && npm install -g @glorioustephan/todoist-autolabel \
+    && apk del python3 make g++
+WORKDIR /data
+CMD ["todoist-autolabel"]
+```
 
 ```bash
-pnpm run pm2:logs
+docker build -t todoist-autolabel .
+docker run -d --name todoist-autolabel \
+  --env-file ./.env \
+  -v "$PWD/labels.json:/data/labels.json:ro" \
+  -v todoist-data:/data/data \
+  todoist-autolabel
 ```
 
-### Log Files
+The `better-sqlite3` build tools are only needed at install time; the multi-stage approach above strips them after install.
 
-PM2 stores logs in the `logs/` directory:
-- `pm2-out.log` - Standard output
-- `pm2-error.log` - Error output
-- `pm2-combined.log` - Combined logs
+## Database management
 
-### View Specific Log File
-
-```bash
-tail -f logs/pm2-out.log
-```
-
-## Managing the Service
-
-### Stop
-
-```bash
-pnpm run pm2:stop
-```
-
-### Restart
-
-```bash
-pnpm run pm2:restart
-```
-
-### Delete from PM2
-
-```bash
-pm2 delete todoist-autolabel
-```
-
-## Auto-Start on Boot
-
-To have the service start automatically when your Mac Mini reboots:
-
-### 1. Generate Startup Script
-
-```bash
-pm2 startup
-```
-
-PM2 will output a command - run it exactly as shown.
-
-### 2. Save Current Process List
-
-After starting your service:
-
-```bash
-pm2 save
-```
-
-### 3. Test It
-
-Reboot your Mac Mini and verify the service starts automatically:
-
-```bash
-ppnpm run pm2:status
-```
-
-## PM2 Configuration
-
-The service is configured in `ecosystem.config.cjs`:
-
-```javascript
-module.exports = {
-  apps: [
-    {
-      name: 'todoist-autolabel',
-      script: 'dist/service.js',
-      instances: 1,
-      autorestart: true,
-      max_memory_restart: '200M',
-      error_file: './logs/pm2-error.log',
-      out_file: './logs/pm2-out.log',
-      time: true,
-      exp_backoff_restart_delay: 100,
-      max_restarts: 10,
-      min_uptime: '10s',
-    },
-  ],
-};
-```
-
-### Configuration Options
-
-| Option | Description |
-|--------|-------------|
-| `name` | Process name in PM2 |
-| `script` | Entry point (compiled JS) |
-| `instances` | Number of instances (keep at 1) |
-| `autorestart` | Restart on crash |
-| `max_memory_restart` | Restart if memory exceeds this |
-| `exp_backoff_restart_delay` | Delay between restart attempts |
-| `max_restarts` | Max restarts in time window |
-| `min_uptime` | Min time to consider "started" |
-
-## Monitoring
-
-### PM2 Monit
-
-Real-time monitoring dashboard:
-
-```bash
-pm2 monit
-```
-
-### PM2 Plus (Optional)
-
-For web-based monitoring, sign up at [PM2.io](https://pm2.io/):
-
-```bash
-pm2 link <secret> <public>
-```
-
-## Updating the Service
-
-### 1. Pull Latest Code
-
-```bash
-git pull origin main
-```
-
-### 2. Install Dependencies
-
-```bash
-pnpm install
-```
-
-### 3. Rebuild
-
-```bash
-ppnpm run build
-```
-
-### 4. Restart Service
-
-```bash
-ppnpm run pm2:restart
-```
-
-## Database Management
-
-### Location
-
-The SQLite database is stored at the path specified in `DB_PATH` (default: `./data/todoist.db`).
+The SQLite database lives at `DB_PATH` (default `<cwd>/data/todoist.db`).
 
 ### Backup
 
 ```bash
-cp data/todoist.db data/todoist.db.backup
+cp data/todoist.db data/todoist.db.$(date +%Y%m%d).backup
 ```
 
-### Reset (Full Resync)
+### Reset (force a full reclassification)
 
-To force a full resync:
-
-1. Stop the service
-2. Delete the database
-3. Start the service
+Stop the service, delete the DB, restart it:
 
 ```bash
-pnpm run pm2:stop
+systemctl stop todoist-autolabel    # or `pm2 stop`, etc.
 rm data/todoist.db
-pnpm run pm2:start
+systemctl start todoist-autolabel
 ```
 
-### View Error Logs in Database
+The service is idempotent — it will re-evaluate every unlabelled Inbox task on the next sync.
+
+### Inspect classification history
 
 ```bash
-sqlite3 data/todoist.db "SELECT * FROM error_logs ORDER BY timestamp DESC LIMIT 20;"
+sqlite3 data/todoist.db \
+  "SELECT task_id, status, labels FROM tasks ORDER BY updated_at DESC LIMIT 20;"
 ```
 
-### View Classification History
+### Inspect recent errors
 
 ```bash
-sqlite3 data/todoist.db "SELECT id, content, classified, labels FROM tasks ORDER BY created_at DESC LIMIT 20;"
+sqlite3 data/todoist.db \
+  "SELECT created_at, error_type, error_message FROM error_logs ORDER BY id DESC LIMIT 20;"
 ```
 
-## Troubleshooting
+## Cost estimation
 
-### Service Keeps Restarting
+Default model: `claude-haiku-4-5-20251001` (~$1 input / ~$5 output per 1M tokens). Per-task token usage is small (typically <500 input tokens, <100 output).
 
-Check the logs for errors:
+| Tasks / day | Estimated monthly cost |
+| ----------- | ---------------------- |
+| 10          | < $0.01                |
+| 100         | ~$0.05                 |
+| 1,000       | ~$0.50                 |
+
+Switch to `claude-sonnet-4-5-20250929` for higher accuracy on subtle taxonomies (~3× the cost).
+
+## Security notes
+
+- **Never commit `.env`.** It is in the default `.gitignore`.
+- Rotate your Todoist and Anthropic tokens periodically.
+- The SQLite DB contains task content — back it up to encrypted storage if your inbox is sensitive.
+
+## Updating
 
 ```bash
-pnpm run pm2:logs --lines 100
+# If you installed globally / via npx:
+npm install -g @glorioustephan/todoist-autolabel@latest
+
+# If you pinned in a project:
+pnpm update @glorioustephan/todoist-autolabel
 ```
 
-Common causes:
-- Missing environment variables
-- Invalid API tokens
-- Network connectivity issues
-
-### Memory Usage
-
-The service uses minimal memory (~50-100MB) since classification is done via API calls. If memory issues occur:
-
-1. Check for memory leaks in logs
-2. Restart the service: `ppnpm run pm2:restart`
-
-### Service Not Starting on Boot
-
-1. Verify startup script was installed:
-   ```bash
-   pm2 startup
-   ```
-
-2. Resave process list:
-   ```bash
-   pm2 save
-   ```
-
-### API Rate Limiting
-
-If you see rate limit errors:
-
-1. Increase `POLL_INTERVAL_MS` in `.env`
-2. The service has built-in 200ms delays between API calls
-
-### Claude API Errors
-
-Common Claude API issues:
-
-| Error | Solution |
-|-------|----------|
-| `credit` / `billing` | Add credits to your Anthropic account |
-| `rate_limit` | Increase poll interval or wait |
-| `invalid_api_key` | Check your `ANTHROPIC_API_KEY` |
-
-## Security Notes
-
-### API Tokens
-
-- Never commit `.env` to version control
-- Rotate tokens periodically
-- Use minimal permissions
-
-### Database
-
-- The SQLite database contains task metadata
-- Back up regularly if needed
-- Delete old data with the built-in FIFO purge
-
-## Useful PM2 Commands
-
-```bash
-# List all processes
-pm2 list
-
-# Show detailed process info
-pm2 show todoist-autolabel
-
-# Clear all logs
-pm2 flush
-
-# Reset restart counter
-pm2 reset todoist-autolabel
-
-# View ecosystem config
-pm2 ecosystem
-```
-
-## Cost Estimation
-
-With Claude Haiku at ~$0.25 per million tokens:
-
-| Tasks/Day | Est. Monthly Cost |
-|-----------|-------------------|
-| 10 | < $0.01 |
-| 100 | ~$0.05 |
-| 1000 | ~$0.50 |
-
-The service is very cost-effective for typical personal use.
+Then restart your supervisor (`pm2 restart`, `systemctl restart`, `docker restart`).

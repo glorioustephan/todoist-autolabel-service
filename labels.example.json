@@ -1,0 +1,14 @@
+{
+  "labels": [
+    { "name": "urgent",       "color": "red" },
+    { "name": "important",    "color": "berry_red" },
+    { "name": "follow-up",    "color": "red" },
+    { "name": "waiting",      "color": "grey" },
+    { "name": "someday",      "color": "charcoal" },
+    { "name": "reference",    "color": "grey" },
+    { "name": "errands",      "color": "red" },
+    { "name": "work",         "color": "berry_red" },
+    { "name": "personal",     "color": "grey" },
+    { "name": "home",         "color": "charcoal" }
+  ]
+}

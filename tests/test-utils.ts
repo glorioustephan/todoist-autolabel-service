@@ -27,7 +27,7 @@ export function createMockConfig(overrides: Partial<Config> = {}): Config {
   return {
     todoistApiToken: 'test-todoist-token',
     anthropicApiKey: 'test-anthropic-key',
-    anthropicModel: 'claude-sonnet-4-5-20250929',
+    anthropicModel: 'claude-haiku-4-5-20251001',
     maxLabelsPerTask: 5,
     pollIntervalMs: 15000,
     maxErrorLogs: 1000,

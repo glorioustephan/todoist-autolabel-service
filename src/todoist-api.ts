@@ -1,27 +1,71 @@
 /**
  * Todoist API client wrapper for Todoist Autolabel Service
+ *
+ * Uses the official @doist/todoist-sdk (Todoist API v1). The legacy v9 REST
+ * endpoints used by @doist/todoist-api-typescript were deprecated in Feb 2026
+ * and now return 410 Gone.
  */
 
-import { TodoistApi } from '@doist/todoist-api-typescript';
+import { TodoistApi } from '@doist/todoist-sdk';
 import type {
   Config,
   TodoistTask,
   TodoistLabel,
-  TaskId,
   ProjectId,
   Result,
 } from './types.js';
-import { ok, err, asTaskId, asProjectId, asLabelId } from './types.js';
+import { ok, err, asProjectId, asTaskId, asLabelId } from './types.js';
 import { getLogger } from './logger.js';
 
 // Delay between API calls to avoid rate limiting (ms)
 const API_DELAY_MS = 200;
+
+// Minimal structural types describing the SDK return shapes we care about.
+// Kept loose because the SDK ships zod-derived types with extra fields.
+interface SdkTask {
+  id: string;
+  content: string;
+  description?: string | null;
+  projectId?: string | null;
+  labels?: string[] | null;
+  priority: number;
+  addedAt?: Date | string | null;
+  checked: boolean;
+}
+
+interface SdkProject {
+  id: string;
+  name: string;
+  inboxProject?: boolean;
+}
 
 /**
  * Sleep for a specified duration
  */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Coerce the SDK's `addedAt` (Date | string | null) to an ISO string.
+ */
+function toIsoString(value: Date | string | null | undefined): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') return value;
+  return '';
+}
+
+function mapTask(task: SdkTask): TodoistTask {
+  return {
+    id: asTaskId(task.id),
+    content: task.content,
+    description: task.description ?? '',
+    projectId: task.projectId ? asProjectId(task.projectId) : null,
+    labels: task.labels ?? [],
+    priority: task.priority,
+    createdAt: toIsoString(task.addedAt),
+    isCompleted: task.checked,
+  };
 }
 
 /**
@@ -36,14 +80,27 @@ export class TodoistApiManager {
   }
 
   /**
-   * Initialize by fetching the inbox project ID
+   * Initialize by fetching the inbox project ID.
+   *
+   * The v1 API paginates projects via cursor, so we walk pages until we
+   * either find the inbox or exhaust results.
    */
   async initialize(): Promise<Result<void, string>> {
     const logger = getLogger();
 
     try {
-      const projects = await this.api.getProjects();
-      const inbox = projects.find((p) => p.isInboxProject);
+      let cursor: string | null = null;
+      let inbox: SdkProject | undefined;
+
+      do {
+        const response = (await this.api.getProjects({ cursor })) as {
+          results: SdkProject[];
+          nextCursor: string | null;
+        };
+        inbox = response.results.find((p) => p.inboxProject);
+        if (inbox) break;
+        cursor = response.nextCursor;
+      } while (cursor);
 
       if (!inbox) {
         return err('Could not find Todoist Inbox project');
@@ -83,22 +140,22 @@ export class TodoistApiManager {
     }
 
     try {
-      const tasks = await this.api.getTasks({ projectId: this.inboxProjectId! });
+      const collected: SdkTask[] = [];
+      let cursor: string | null = null;
 
-      logger.debug(`Fetched ${tasks.length} tasks from Inbox`);
+      do {
+        const response = (await this.api.getTasks({
+          projectId: this.inboxProjectId!,
+          cursor,
+        })) as { results: SdkTask[]; nextCursor: string | null };
 
-      const mappedTasks = tasks.map((task) => ({
-        id: task.id as TaskId,
-        content: task.content,
-        description: task.description || '',
-        projectId: (task.projectId as ProjectId) || null,
-        labels: task.labels || [],
-        priority: task.priority,
-        createdAt: task.createdAt,
-        isCompleted: task.isCompleted,
-      }));
+        collected.push(...response.results);
+        cursor = response.nextCursor;
+      } while (cursor);
 
-      return ok(mappedTasks);
+      logger.debug(`Fetched ${collected.length} tasks from Inbox`);
+
+      return ok(collected.map(mapTask));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('Failed to fetch inbox tasks', error);
@@ -113,11 +170,21 @@ export class TodoistApiManager {
     const logger = getLogger();
 
     try {
-      const labels = await this.api.getLabels();
-      
-      logger.debug(`Fetched ${labels.length} labels from Todoist`);
-      
-      return labels.map((label) => ({
+      const collected: { id: string; name: string; color: string }[] = [];
+      let cursor: string | null = null;
+
+      do {
+        const response = (await this.api.getLabels({ cursor })) as {
+          results: { id: string; name: string; color: string }[];
+          nextCursor: string | null;
+        };
+        collected.push(...response.results);
+        cursor = response.nextCursor;
+      } while (cursor);
+
+      logger.debug(`Fetched ${collected.length} labels from Todoist`);
+
+      return collected.map((label) => ({
         id: asLabelId(label.id),
         name: label.name,
         color: label.color,
@@ -136,9 +203,9 @@ export class TodoistApiManager {
 
     try {
       await sleep(API_DELAY_MS);
-      
+
       await this.api.updateTask(taskId, { labels });
-      
+
       logger.debug('Updated task labels', { taskId, labels });
     } catch (error) {
       logger.error('Failed to update task labels', error, { taskId, labels });
@@ -153,18 +220,8 @@ export class TodoistApiManager {
     const logger = getLogger();
 
     try {
-      const task = await this.api.getTask(taskId);
-      
-      return {
-        id: asTaskId(task.id),
-        content: task.content,
-        description: task.description || '',
-        projectId: task.projectId ? asProjectId(task.projectId) : null,
-        labels: task.labels || [],
-        priority: task.priority,
-        createdAt: task.createdAt,
-        isCompleted: task.isCompleted,
-      };
+      const task = (await this.api.getTask(taskId)) as SdkTask;
+      return mapTask(task);
     } catch (error) {
       // Task might have been deleted
       logger.warn('Failed to fetch task', { taskId, error: String(error) });
@@ -229,4 +286,3 @@ export function getTodoistApi(): TodoistApiManager {
 export function resetTodoistApi(): void {
   apiInstance = null;
 }
-

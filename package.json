@@ -1,8 +1,53 @@
 {
-  "name": "todoist-autolabel-service",
-  "version": "1.0.0",
+  "name": "@glorioustephan/todoist-autolabel",
+  "version": "0.0.0",
+  "description": "Automatically classify and label Todoist Inbox tasks with Claude AI using Structured Outputs.",
+  "keywords": [
+    "todoist",
+    "autolabel",
+    "claude",
+    "anthropic",
+    "ai",
+    "classification",
+    "productivity",
+    "labels",
+    "structured-outputs",
+    "cli"
+  ],
+  "author": "glorioustephan",
+  "license": "MIT",
+  "homepage": "https://github.com/glorioustephan/todoist-autolabel-service#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/glorioustephan/todoist-autolabel-service.git"
+  },
+  "bugs": {
+    "url": "https://github.com/glorioustephan/todoist-autolabel-service/issues"
+  },
   "type": "module",
-  "main": "dist/service.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "todoist-autolabel": "dist/service.js"
+  },
+  "files": [
+    "dist",
+    "env.example",
+    "labels.example.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/service.js",
@@ -13,20 +58,17 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "validate-env": "tsx src/validate-env.ts",
-    "postinstall": "pnpm run build",
-    "pm2:start": "pnpm run validate-env && pm2 start ecosystem.config.cjs",
-    "pm2:stop": "pm2 stop todoist-autolabel",
-    "pm2:restart": "pm2 restart todoist-autolabel",
-    "pm2:logs": "pm2 logs todoist-autolabel",
-    "pm2:status": "pm2 status"
+    "commit": "cz",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
-  "keywords": ["todoist", "autolabel", "claude", "classification"],
-  "author": "",
-  "license": "ISC",
-  "description": "Automatic task labeling service for Todoist using Claude AI",
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
-    "@doist/todoist-api-typescript": "^3.0.3",
+    "@doist/todoist-sdk": "^10.1.3",
     "better-sqlite3": "^11.3.0",
     "chalk": "^5.3.0",
     "dotenv": "^16.4.5"
@@ -36,12 +78,14 @@
     "@types/node": "^22.5.0",
     "@vitest/coverage-v8": "^2.0.5",
     "@vitest/ui": "^2.0.5",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
     "happy-dom": "^15.7.4",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   },
   "engines": {
-    "node": ">=18.17.0"
+    "node": ">=20.18.1"
   }
 }
