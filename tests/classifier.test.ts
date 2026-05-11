@@ -74,7 +74,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
     config = createMockConfig({
       anthropicApiKey: 'test-anthropic-key',
-      anthropicModel: 'claude-sonnet-4-5-20250929',
+      anthropicModel: 'claude-haiku-4-5-20251001',
       maxLabelsPerTask: 3,
     });
   });
@@ -277,7 +277,7 @@ describe('classifier.ts - Claude AI Classification', () => {
         const result = await classifier.classifyTask(classificationRequest);
 
         expect(mockBetaMessagesCreate).toHaveBeenCalledWith({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 256,
           betas: ['structured-outputs-2025-11-13'],
           system: expect.stringContaining('task classification assistant'),

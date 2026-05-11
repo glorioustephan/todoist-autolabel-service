@@ -72,8 +72,8 @@ export function loadConfig(): Config {
     todoistApiToken: requireEnv('TODOIST_API_TOKEN'),
     anthropicApiKey: requireEnv('ANTHROPIC_API_KEY'),
 
-    // Claude configuration (Structured Outputs requires Sonnet 4.5 or Opus 4)
-    anthropicModel: getEnv('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250929'),
+    // Claude configuration (Structured Outputs is supported on Haiku 4.5+, Sonnet 4.5+, and Opus 4+)
+    anthropicModel: getEnv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001'),
     maxLabelsPerTask: getEnvNumber('MAX_LABELS_PER_TASK', 5),
 
     // Service configuration
