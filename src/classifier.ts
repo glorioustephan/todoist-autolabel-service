@@ -30,7 +30,9 @@ export async function loadLabels(labelsPath: string): Promise<Result<readonly st
 
     // Type guard for LabelsConfig
     if (!isLabelsConfig(config)) {
-      return err('Invalid labels.json: missing "labels" array or malformed structure');
+      return err(
+        `Invalid labels file at ${labelsPath}: expected { "labels": [{ "name": string, "color"?: string }, ...] }`
+      );
     }
 
     const labelNames = config.labels.map((l) => l.name);
@@ -38,10 +40,24 @@ export async function loadLabels(labelsPath: string): Promise<Result<readonly st
 
     return ok(labelNames);
   } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return err(
+        `No labels file found at ${labelsPath}.\n` +
+          `  Provide one of:\n` +
+          `    - a labels.json in the current directory\n` +
+          `    - --labels <path> on the command line\n` +
+          `    - LABELS_PATH=<path> in the environment\n` +
+          `  Or scaffold one with: npx todoist-autolabel init`
+      );
+    }
     const message = error instanceof Error ? error.message : String(error);
     logger.error('Failed to load labels', error, { labelsPath });
-    return err(`Failed to load labels: ${message}`);
+    return err(`Failed to load labels from ${labelsPath}: ${message}`);
   }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
 }
 
 /**

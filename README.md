@@ -65,7 +65,15 @@ npx @glorioustephan/todoist-autolabel
 pnpm add @glorioustephan/todoist-autolabel
 ```
 
-### 2. Create `.env` and `labels.json` in your working directory
+### 2. Scaffold `.env` and `labels.json`
+
+```bash
+npx @glorioustephan/todoist-autolabel init
+```
+
+This drops a starter `.env` and `labels.json` into the current directory (won't clobber existing files — pass `--force` to overwrite). Skip this step if you'd rather hand-roll them as below.
+
+### 2b. Or create them manually
 
 `.env`:
 
@@ -100,7 +108,27 @@ LOG_LEVEL=info
 npx @glorioustephan/todoist-autolabel
 ```
 
-The CLI runs forever, polling Todoist every `POLL_INTERVAL_MS` (default 5 minutes). Stop it with `Ctrl+C`.
+The CLI runs forever, polling Todoist every `POLL_INTERVAL_MS`. Stop it with `Ctrl+C`.
+
+### CLI reference
+
+```text
+todoist-autolabel [options]
+todoist-autolabel init [--force]
+
+Options
+  -l, --labels <path>   Path to your labels file (default: ./labels.json)
+  -h, --help            Show help and exit
+  -v, --version         Print version and exit
+```
+
+You can point at any labels file you like:
+
+```bash
+npx @glorioustephan/todoist-autolabel --labels ./taxonomies/work.json
+# or
+LABELS_PATH=./taxonomies/work.json npx @glorioustephan/todoist-autolabel
+```
 
 ## Quick start (library)
 

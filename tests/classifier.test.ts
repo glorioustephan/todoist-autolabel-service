@@ -144,7 +144,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error).toContain('Invalid labels.json');
+        expect(result.error).toContain('Invalid labels file');
       }
     });
 
@@ -157,7 +157,7 @@ describe('classifier.ts - Claude AI Classification', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error).toContain('Invalid labels.json');
+        expect(result.error).toContain('Invalid labels file');
       }
     });
 

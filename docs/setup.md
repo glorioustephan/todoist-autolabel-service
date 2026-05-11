@@ -39,6 +39,15 @@ pnpm exec todoist-autolabel
 
 The service reads configuration from **two files in the current working directory**:
 
+```bash
+npx @glorioustephan/todoist-autolabel init
+```
+
+`init` drops a starter `.env` and `labels.json` next to wherever you ran the
+command (refusing to overwrite existing files unless you pass `--force`).
+
+If you'd rather hand-roll them, the templates are described below.
+
 ### `.env`
 
 Copy the template and fill in your credentials:
@@ -74,7 +83,17 @@ A starting point (red/grey themed to match Todoist's palette) is published with 
 }
 ```
 
-Save your taxonomy as `labels.json` in the same directory as `.env`. The `color` values use [Todoist's named palette](https://developer.todoist.com/api/v1/#tag/Labels) (e.g. `red`, `berry_red`, `grey`, `charcoal`, `taupe`, `sky_blue`, …).
+Save your taxonomy as `labels.json` in the same directory as `.env` — or anywhere you like, and tell the CLI where to find it:
+
+```bash
+# Per-invocation:
+npx @glorioustephan/todoist-autolabel --labels ./taxonomies/work.json
+
+# Or in .env:
+LABELS_PATH=./taxonomies/work.json
+```
+
+The `color` values use [Todoist's named palette](https://developer.todoist.com/api/v1/#tag/Labels) (e.g. `red`, `berry_red`, `grey`, `charcoal`, `taupe`, `sky_blue`, …).
 
 ## Get your API tokens
 

@@ -6,6 +6,11 @@
  * from any directory; configuration is loaded from the CWD's `.env`.
  */
 
+import { readFileSync } from 'fs';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { parseArgs } from 'util';
 import { loadConfig, getConfig } from './config.js';
 import { createLogger, getLogger } from './logger.js';
 import { initDatabase, closeDatabase, getDatabase } from './database.js';
@@ -157,9 +162,169 @@ function printStats(): void {
 }
 
 /**
+ * Resolve a file shipped alongside this module (e.g. `labels.example.json`).
+ * Inside the published package, templates sit one directory up from `dist/`.
+ */
+function packageFile(...segments: string[]): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, '..', ...segments);
+}
+
+const HELP = `todoist-autolabel — auto-classify Todoist Inbox tasks with Claude AI
+
+USAGE
+  todoist-autolabel [options]
+  todoist-autolabel init [--force]
+
+COMMANDS
+  init                   Scaffold .env and labels.json in the current
+                         directory from the bundled templates.
+
+OPTIONS
+  -l, --labels <path>    Path to your labels file
+                         (default: ./labels.json, or LABELS_PATH env var)
+  -h, --help             Show this help and exit
+  -v, --version          Print the package version and exit
+
+ENVIRONMENT
+  TODOIST_API_TOKEN      Required. Todoist API token.
+  ANTHROPIC_API_KEY      Required. Anthropic API key.
+  ANTHROPIC_MODEL        Claude model (default: claude-haiku-4-5-20251001).
+  LABELS_PATH            Override the labels file location.
+  DB_PATH                SQLite database path (default: ./data/todoist.db).
+  POLL_INTERVAL_MS       Polling interval (default: 15000).
+  LOG_LEVEL              debug | info | warn | error (default: info).
+
+Full reference: https://github.com/glorioustephan/todoist-autolabel-service#readme
+`;
+
+/**
+ * Copy a single template into the consumer's CWD without clobbering existing
+ * user state unless `--force` is passed.
+ */
+async function copyTemplate(
+  source: string,
+  destination: string,
+  force: boolean
+): Promise<'created' | 'skipped' | 'overwritten'> {
+  try {
+    await fs.access(destination);
+    if (!force) return 'skipped';
+    await fs.copyFile(source, destination);
+    return 'overwritten';
+  } catch {
+    await fs.copyFile(source, destination);
+    return 'created';
+  }
+}
+
+/**
+ * `init` subcommand: scaffold .env and labels.json in CWD.
+ */
+async function runInit(force: boolean): Promise<void> {
+  const targets: { from: string; to: string; label: string }[] = [
+    {
+      from: packageFile('env.example'),
+      to: path.resolve(process.cwd(), '.env'),
+      label: '.env',
+    },
+    {
+      from: packageFile('labels.example.json'),
+      to: path.resolve(process.cwd(), 'labels.json'),
+      label: 'labels.json',
+    },
+  ];
+
+  for (const { from, to, label } of targets) {
+    try {
+      const result = await copyTemplate(from, to, force);
+      if (result === 'skipped') {
+        console.log(`✓ ${label} already exists — left untouched (pass --force to overwrite)`);
+      } else if (result === 'overwritten') {
+        console.log(`✓ ${label} overwritten from template`);
+      } else {
+        console.log(`✓ ${label} created from template`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`✗ Failed to create ${label}: ${message}`);
+      process.exit(1);
+    }
+  }
+
+  console.log('\nNext steps:');
+  console.log('  1. Open .env and fill in TODOIST_API_TOKEN and ANTHROPIC_API_KEY.');
+  console.log('  2. Adjust labels.json to match your Todoist label taxonomy.');
+  console.log('  3. Run: npx todoist-autolabel');
+}
+
+/**
+ * Parse CLI arguments and apply overrides to the environment so that the
+ * existing config loader (which is purely env-driven) picks them up.
+ *
+ * Returns the resolved subcommand the rest of `main()` should run.
+ */
+function parseCliArgs(): { command: 'run' | 'init'; force: boolean } {
+  const positionals = process.argv.slice(2);
+
+  // Cheap pre-scan for `init` to avoid `parseArgs` swallowing it as a flag.
+  if (positionals[0] === 'init') {
+    const force = positionals.includes('--force') || positionals.includes('-f');
+    return { command: 'init', force };
+  }
+
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      options: {
+        labels: { type: 'string', short: 'l' },
+        help: { type: 'boolean', short: 'h' },
+        version: { type: 'boolean', short: 'v' },
+      },
+      allowPositionals: false,
+      strict: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`✗ ${message}\n`);
+    console.error(HELP);
+    process.exit(2);
+  }
+
+  const values = parsed.values;
+
+  if (values.help) {
+    console.log(HELP);
+    process.exit(0);
+  }
+
+  if (values.version) {
+    const pkg = JSON.parse(
+      readFileSync(packageFile('package.json'), 'utf-8')
+    ) as { version: string };
+    console.log(pkg.version);
+    process.exit(0);
+  }
+
+  if (typeof values.labels === 'string') {
+    // Override before loadConfig() runs so the env-driven loader picks it up.
+    process.env.LABELS_PATH = path.resolve(process.cwd(), values.labels);
+  }
+
+  return { command: 'run', force: false };
+}
+
+/**
  * Main entry point
  */
 async function main(): Promise<void> {
+  const { command, force } = parseCliArgs();
+
+  if (command === 'init') {
+    await runInit(force);
+    return;
+  }
+
   try {
     // Initialize all components
     await initialize();
